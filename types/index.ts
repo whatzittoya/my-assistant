@@ -45,6 +45,7 @@ export type Session = {
 };
 
 export type PedomanItem = {
+  id: string;
   criteria: string;
   maxScore: number;
 };
@@ -53,6 +54,34 @@ export type TugasMeta = {
   description: string;
   pedomanItems: PedomanItem[];
   updatedAt: string | null;
+};
+
+export type DiskusiMeta = {
+  question: string;
+  pedomanItems: PedomanItem[];
+  updatedAt: string | null;
+};
+
+export type CriteriaScore = {
+  id: string;
+  criteria: string;
+  score: number;
+  maxScore: number;
+};
+
+export type SubmissionAiEval = {
+  criteriaScores: CriteriaScore[];
+  totalScore: number;
+  reasoning: string;
+  feedback: string;
+  generatedAt: string;
+};
+
+export type SubmissionFinalEval = {
+  criteriaScores: CriteriaScore[];
+  totalScore: number;
+  feedback: string;
+  savedAt: string;
 };
 
 export type TugasFile = {
@@ -71,9 +100,11 @@ export type TugasSubmission = {
   lastModifiedSubmission: string;
   lastModifiedGrade: string | null;
   feedbackComment: string;
-  finalGrade: string | null;
+  finalGrade: number | null;
   files: TugasFile[];
   collectedAt: string;
+  aiEval?: SubmissionAiEval;
+  finalEval?: SubmissionFinalEval;
 };
 
 export type Post = {

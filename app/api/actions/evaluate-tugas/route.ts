@@ -5,14 +5,13 @@ import * as path from "path";
 import { gemini } from "@/lib/gemini";
 import { getSkill } from "@/lib/skills";
 import { getTugasMeta } from "@/lib/tugas-meta";
-import { listTugasSubmissions } from "@/lib/tugas";
+import { listTugasSubmissions, saveAiEval } from "@/lib/tugas";
 import { Type } from "@google/genai";
 import { logger } from "@/lib/activity-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-// Files are already converted to PDF during download — just map extension to MIME
 const MIME_MAP: Record<string, string> = {
   ".pdf": "application/pdf",
   ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -22,8 +21,6 @@ const MIME_MAP: Record<string, string> = {
 };
 
 const FILES_BASE = path.join(process.cwd(), ".tugas-files");
-
-// ── Route ──────────────────────────────────────────────────────────────────────
 
 const Body = z.object({
   credentialId: z.string().min(1),
@@ -58,17 +55,18 @@ export async function POST(req: Request) {
     return NextResponse.json({ results: [] });
 
   const totalMax = meta.pedomanItems.reduce((sum, item) => sum + item.maxScore, 0) || 100;
+  const hasCriteria = meta.pedomanItems.length > 0;
 
-  const pedomanBlock =
-    meta.pedomanItems.length > 0
-      ? [
-          `Pedoman Penilaian (Total Maks. ${totalMax} poin):`,
-          ...meta.pedomanItems.map(
-            (item, i) => `${i + 1}. ${item.criteria} — maks. ${item.maxScore} poin`,
-          ),
-          `\nBerikan skor total antara 0 sampai ${totalMax}.`,
-        ].join("\n")
-      : "";
+  const pedomanBlock = hasCriteria
+    ? [
+        `Pedoman Penilaian (Total Maks. ${totalMax} poin):`,
+        ...meta.pedomanItems.map(
+          (item, i) => `${i + 1}. [id:${item.id}] ${item.criteria} — maks. ${item.maxScore} poin`,
+        ),
+        `\nKembalikan criteriaScores dengan field "id" (gunakan ID dalam tanda kurung di atas), "score", dan "maxScore" saja — tidak perlu field "criteria".`,
+        `totalScore adalah jumlah semua skor kriteria (0–${totalMax}).`,
+      ].join("\n")
+    : "";
 
   const systemInstruction = [
     skill.systemPrompt,
@@ -78,12 +76,56 @@ export async function POST(req: Request) {
     .filter(Boolean)
     .join("\n\n");
 
+  // Build responseSchema dynamically based on whether criteria exist
+  const criteriaScoreSchema = hasCriteria
+    ? {
+        type: Type.OBJECT,
+        properties: {
+          id: { type: Type.STRING, description: "Criterion ID from the pedoman" },
+          score: { type: Type.INTEGER, minimum: 0 },
+          maxScore: { type: Type.INTEGER, minimum: 0 },
+        },
+        required: ["id", "score", "maxScore"],
+      }
+    : {
+        type: Type.OBJECT,
+        properties: {
+          id: { type: Type.STRING },
+          score: { type: Type.INTEGER, minimum: 0 },
+          maxScore: { type: Type.INTEGER, minimum: 0 },
+        },
+        required: ["id", "score", "maxScore"],
+      };
+
+  const responseSchema = {
+    type: Type.OBJECT,
+    properties: {
+      name: { type: Type.STRING },
+      criteriaScores: {
+        type: Type.ARRAY,
+        items: criteriaScoreSchema,
+        description: hasCriteria
+          ? "Score per criterion matching the pedoman penilaian"
+          : "Empty array if no criteria defined",
+      },
+      totalScore: { type: Type.INTEGER, minimum: 0, maximum: totalMax },
+      reasoning: {
+        type: Type.STRING,
+        description: "Internal reasoning explaining why these scores were given",
+      },
+      feedback: {
+        type: Type.STRING,
+        description: "Public feedback comment to be shown to the student",
+      },
+    },
+    required: ["name", "criteriaScores", "totalScore", "reasoning", "feedback"],
+  };
+
   const ai = gemini();
   const encoder = new TextEncoder();
   const stream = new TransformStream<Uint8Array, Uint8Array>();
   const writer = stream.writable.getWriter();
 
-  // Process sequentially in background — write each result immediately
   (async () => {
     for (const sub of submissions) {
       logger.info(`Evaluating ${sub.name}`);
@@ -104,9 +146,18 @@ export async function POST(req: Request) {
           const ext = path.extname(file.localPath).toLowerCase();
           const mimeType = MIME_MAP[ext] ?? "application/pdf";
 
+          // Multipart upload filename must be Latin-1 safe — pass a File object with sanitized name
+          const rawName = path.basename(file.localPath);
+          const safeName = rawName
+            .replace(/[–—]/g, "-")          // typographic dashes → hyphen
+            .replace(/[^\x00-\xFF]/g, "_"); // everything else outside Latin-1
+
+          const fileBuffer = fs.readFileSync(absPath);
+          const fileObj = new File([fileBuffer], safeName, { type: mimeType });
+
           const uploaded = await ai.files.upload({
-            file: absPath,
-            config: { mimeType, displayName: path.basename(file.localPath) },
+            file: fileObj,
+            config: { mimeType, displayName: safeName },
           });
 
           if (uploaded.uri) {
@@ -121,24 +172,60 @@ export async function POST(req: Request) {
           config: {
             systemInstruction,
             responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                name: { type: Type.STRING },
-                score: { type: Type.INTEGER, minimum: 0, maximum: totalMax },
-                feedback: { type: Type.STRING },
-              },
-              required: ["name", "score", "feedback"],
-            },
+            responseSchema,
           },
         });
 
         const raw = response.text ?? "{}";
-        const result = JSON.parse(raw) as { name: string; score: number; feedback: string };
-        logger.ok(`${sub.name}: score=${result.score}`);
+        const result = JSON.parse(raw) as {
+          name: string;
+          criteriaScores: { id?: string; criteria?: string; score: number; maxScore: number }[];
+          totalScore: number;
+          reasoning: string;
+          feedback: string;
+        };
+
+        // Build a lookup map from pedoman ids
+        const pedomanById = new Map(meta.pedomanItems.map((p) => [p.id, p]));
+
+        // Resolve id → full CriteriaScore, filling in criteria text and maxScore from pedoman
+        const resolvedCriteria = (result.criteriaScores ?? []).map((c) => {
+          const pedoman = c.id ? pedomanById.get(c.id) : undefined;
+          return {
+            id: c.id ?? "",
+            criteria: pedoman?.criteria ?? c.criteria ?? c.id ?? "",
+            score: c.score,
+            maxScore: pedoman?.maxScore ?? c.maxScore,
+          };
+        });
+
+        const totalScore =
+          resolvedCriteria.length > 0
+            ? resolvedCriteria.reduce((s, c) => s + c.score, 0)
+            : (result.totalScore ?? 0);
+
+        const evalData = {
+          criteriaScores: resolvedCriteria,
+          totalScore,
+          reasoning: result.reasoning ?? "",
+          feedback: result.feedback ?? "",
+        };
+
+        // Persist to Firestore immediately
+        try {
+          await saveAiEval(credentialId, courseId, assignId, sub.userId, evalData);
+        } catch (saveErr) {
+          logger.warn(`saveAiEval failed for ${sub.name}: ${saveErr}`);
+        }
+
+        logger.ok(`${sub.name}: score=${totalScore}`);
         await writer.write(
           encoder.encode(
-            JSON.stringify({ userId: sub.userId, name: result.name || sub.name, score: result.score, feedback: result.feedback }) + "\n",
+            JSON.stringify({
+              userId: sub.userId,
+              name: result.name || sub.name,
+              ...evalData,
+            }) + "\n",
           ),
         );
       } catch (e) {
@@ -146,7 +233,15 @@ export async function POST(req: Request) {
         logger.err(`${sub.name}: ${msg}`);
         await writer.write(
           encoder.encode(
-            JSON.stringify({ userId: sub.userId, name: sub.name, score: 0, feedback: "", error: msg }) + "\n",
+            JSON.stringify({
+              userId: sub.userId,
+              name: sub.name,
+              criteriaScores: [],
+              totalScore: 0,
+              reasoning: "",
+              feedback: "",
+              error: msg,
+            }) + "\n",
           ),
         );
       }

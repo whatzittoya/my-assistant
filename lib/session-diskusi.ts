@@ -1,5 +1,5 @@
 import { db } from "@/lib/firebase-admin";
-import type { Discussion, Post } from "@/types";
+import type { Discussion, Post, PedomanItem, DiskusiMeta } from "@/types";
 import { Timestamp } from "firebase-admin/firestore";
 
 // Path: credentials/{id}/courses/{courseId}/diskusi/{forumId}/discussions/{discId}
@@ -151,6 +151,65 @@ export async function listSessionPosts(
 ): Promise<Post[]> {
   const snap = await postsCol(credentialId, courseId, forumId, discId).get();
   return snap.docs.map((d) => toPost(d.id, d.data()));
+}
+
+// ── Diskusi meta (question + pedoman penilaian) ───────────────────────────────
+
+function genMetaId(): string {
+  return Math.random().toString(36).slice(2, 8);
+}
+
+function parsePedomanItems(data: FirebaseFirestore.DocumentData): PedomanItem[] {
+  if (Array.isArray(data.pedomanItems)) {
+    return (data.pedomanItems as unknown[])
+      .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+      .filter((item) => typeof item.criteria === "string" && typeof item.maxScore === "number")
+      .map((item) => ({
+        id: typeof item.id === "string" && item.id ? item.id : genMetaId(),
+        criteria: item.criteria as string,
+        maxScore: item.maxScore as number,
+      }));
+  }
+  return [];
+}
+
+// Dedicated meta doc: credentials/{id}/courses/{cid}/diskusi/{fid}/discussions/{did}/meta/data
+// Separate from the scraped discussion doc to avoid merge conflicts.
+function metaRef(credentialId: string, courseId: string, forumId: string, discId: string) {
+  return discCol(credentialId, courseId, forumId)
+    .doc(discId)
+    .collection("meta")
+    .doc("data");
+}
+
+export async function getDiskusiMeta(
+  credentialId: string,
+  courseId: string,
+  forumId: string,
+  discId: string,
+): Promise<DiskusiMeta> {
+  const doc = await metaRef(credentialId, courseId, forumId, discId).get();
+  if (!doc.exists) return { question: "", pedomanItems: [], updatedAt: null };
+  const data = doc.data()!;
+  return {
+    question: data.question ?? "",
+    pedomanItems: parsePedomanItems(data),
+    updatedAt: (data.metaUpdatedAt as Timestamp)?.toDate().toISOString() ?? null,
+  };
+}
+
+export async function saveDiskusiMeta(
+  credentialId: string,
+  courseId: string,
+  forumId: string,
+  discId: string,
+  meta: { question: string; pedomanItems: PedomanItem[] },
+): Promise<void> {
+  await metaRef(credentialId, courseId, forumId, discId).set({
+    question: meta.question,
+    pedomanItems: meta.pedomanItems,
+    metaUpdatedAt: Timestamp.now(),
+  });
 }
 
 export async function deleteSessionDiscussion(

@@ -43,10 +43,13 @@ export async function GET(req: Request) {
   const ext = path.extname(filename).toLowerCase();
   const contentType = MIME[ext] ?? "application/octet-stream";
 
+  const PREVIEWABLE = new Set([".pdf", ".png", ".jpg", ".jpeg", ".txt"]);
+  const disposition = PREVIEWABLE.has(ext) ? "inline" : `attachment; filename="${encodeURIComponent(filename)}"`;
+
   return new Response(buffer, {
     headers: {
       "Content-Type": contentType,
-      "Content-Disposition": `attachment; filename="${encodeURIComponent(filename)}"`,
+      "Content-Disposition": disposition,
       "Content-Length": String(buffer.length),
     },
   });

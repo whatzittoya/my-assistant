@@ -12,6 +12,7 @@ const Body = z.object({
   credentialId: z.string().min(1),
   courseId: z.string().min(1),
   assignId: z.string().min(1),
+  downloadFiles: z.boolean().optional().default(true),
 });
 
 export async function POST(req: Request) {
@@ -19,13 +20,13 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  const { credentialId, courseId, assignId } = parsed.data;
+  const { credentialId, courseId, assignId, downloadFiles } = parsed.data;
 
   try {
     const session = await getSession(credentialId);
-    logger.info(`Collecting tugas ${assignId}`);
+    logger.info(`Collecting tugas ${assignId}${downloadFiles ? "" : " (skip file download)"}`);
 
-    const submissions = await scrapeTugasSubmissions(session.page, assignId, credentialId);
+    const submissions = await scrapeTugasSubmissions(session.page, assignId, credentialId, downloadFiles);
     await saveTugasSubmissions(credentialId, courseId, assignId, submissions);
 
     logger.ok(`Collected ${submissions.length} submissions for tugas ${assignId}`);

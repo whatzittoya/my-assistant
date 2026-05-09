@@ -14,7 +14,7 @@ import {
 import { toast } from "sonner";
 import { PostThread } from "@/components/post-thread";
 import { SkillManager } from "@/components/skill-manager";
-import type { Post } from "@/types";
+import type { Post, DiskusiMeta, PedomanItem } from "@/types";
 import type { Skill } from "@/lib/skills";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -46,10 +46,31 @@ function sanitizeDraft(text: string): string {
   return text.replace(/\s*\u2014\s*/g, ", ");
 }
 
+function genId() {
+  return Math.random().toString(36).slice(2, 8);
+}
+
 function scoreColor(score: number) {
   if (score >= 80) return "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300";
   if (score >= 60) return "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300";
   return "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300";
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="rounded-lg border">
+      <button
+        type="button"
+        className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold hover:bg-muted/30 transition-colors"
+        onClick={() => setOpen((v) => !v)}
+      >
+        {title}
+        <span className="text-muted-foreground text-xs">{open ? "▲" : "▼"}</span>
+      </button>
+      {open && <div className="px-4 pb-4 space-y-3">{children}</div>}
+    </div>
+  );
 }
 
 // ── Inline draft card (shown below each unreplied student post) ───────────────
@@ -220,15 +241,37 @@ function stripHtml(html: string) {
   return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 }
 
-function buildInstruction(promptPost: Post | undefined, discussionTitle: string) {
+function buildInstruction(
+  promptPost: Post | undefined,
+  discussionTitle: string,
+  question: string,
+  pedomanItems: PedomanItem[],
+) {
+  const activePedoman = pedomanItems.filter((p) => p.criteria.trim());
+  const totalMax = activePedoman.reduce((s, p) => s + p.maxScore, 0) || 100;
+
+  const pedomanBlock =
+    activePedoman.length > 0
+      ? [
+          `\nPedoman Penilaian (Total Maks. ${totalMax} poin):`,
+          ...activePedoman.map((p, i) => `${i + 1}. ${p.criteria} — maks. ${p.maxScore} poin`),
+        ].join("\n")
+      : "";
+
+  const questionLine = question.trim()
+    ? `- Pertanyaan diskusi: "${question.trim()}"`
+    : promptPost
+      ? `- The lecturer's question (prompt): "${stripHtml(promptPost.contentHtml)}"`
+      : "";
+
   return `You are an assistant helping a university lecturer evaluate and reply to student discussion posts.
 
 Context:
 - Discussion title: "${discussionTitle}"
-- The lecturer's question (prompt): "${promptPost ? stripHtml(promptPost.contentHtml) : ""}"
+${questionLine}${pedomanBlock}
 
 For each student post you receive, you must produce:
-1. score (0–100): Grade the answer based on relevance, depth, and clarity.
+1. score (0–100): Grade the answer based on relevance, depth, and clarity${activePedoman.length > 0 ? " according to the pedoman penilaian above" : ""}.
 2. reply: A short, personal, encouraging lecturer reply in Bahasa Indonesia (2–4 sentences max).
 3. ai_score (0–100): Likelihood that the text was AI-generated (100 = almost certainly AI, 0 = clearly human).
 4. duplicate_confidence (0–100): Likelihood that this post was copied/plagiarised from another student in this batch (100 = definite copy, 0 = original).
@@ -281,6 +324,8 @@ function ExportDialog({
   selectedPosts,
   promptPost,
   discussionTitle,
+  question,
+  pedomanItems,
   onLoadDrafts,
 }: {
   open: boolean;
@@ -288,6 +333,8 @@ function ExportDialog({
   selectedPosts: Post[];
   promptPost: Post | undefined;
   discussionTitle: string;
+  question: string;
+  pedomanItems: PedomanItem[];
   onLoadDrafts: (results: AiResult[]) => void;
 }) {
   const [tab, setTab] = useState<"instruction" | "discussion" | "upload">("instruction");
@@ -295,7 +342,7 @@ function ExportDialog({
   const [parseError, setParseError] = useState("");
   const [parsed, setParsed] = useState<AiResult[]>([]);
 
-  const instruction = buildInstruction(promptPost, discussionTitle);
+  const instruction = buildInstruction(promptPost, discussionTitle, question, pedomanItems);
   const discussionJson = buildDiscussionJson(selectedPosts);
 
   function copy(text: string) {
@@ -468,6 +515,7 @@ export function DiskusiActions({
   discId,
   discussionUrl,
   posts,
+  initialMeta,
 }: {
   credentialId: string;
   courseId: string;
@@ -475,6 +523,7 @@ export function DiskusiActions({
   discId: string;
   discussionUrl: string;
   posts: Post[];
+  initialMeta: DiskusiMeta;
 }) {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [skillId, setSkillId] = useState("");
@@ -490,6 +539,15 @@ export function DiskusiActions({
   const [showExport, setShowExport] = useState(false);
   const [highlightPostId, setHighlightPostId] = useState<string | undefined>();
 
+  // Meta state
+  const [question, setQuestion] = useState(initialMeta.question);
+  const [pedomanItems, setPedomanItems] = useState<PedomanItem[]>(
+    initialMeta.pedomanItems.length > 0
+      ? initialMeta.pedomanItems
+      : [{ id: genId(), criteria: "", maxScore: 100 }],
+  );
+  const [savingMeta, setSavingMeta] = useState(false);
+
   useEffect(() => {
     fetch("/api/skills")
       .then((r) => r.json())
@@ -500,6 +558,39 @@ export function DiskusiActions({
       })
       .catch(() => {});
   }, []);
+
+  async function saveMeta() {
+    setSavingMeta(true);
+    try {
+      const res = await fetch(`/api/session-diskusi/${forumId}/${discId}/meta`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ credentialId, courseId, question, pedomanItems }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      toast.success("Saved");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setSavingMeta(false);
+    }
+  }
+
+  function updatePedomanItem(index: number, field: keyof PedomanItem, value: string | number) {
+    setPedomanItems((prev) =>
+      prev.map((item, i) => (i === index ? { ...item, [field]: value } : item)),
+    );
+  }
+
+  function addPedomanItem() {
+    setPedomanItems((prev) => [...prev, { id: genId(), criteria: "", maxScore: 0 }]);
+  }
+
+  function removePedomanItem(index: number) {
+    setPedomanItems((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  const totalMax = pedomanItems.reduce((sum, item) => sum + item.maxScore, 0) || 100;
 
   // All non-me posts at any depth > 0 (initial replies + follow-ups after my response)
   const allStudentPosts = posts.filter((p) => p.depth > 0 && !p.isMyPost);
@@ -678,6 +769,70 @@ export function DiskusiActions({
 
   return (
     <div className="space-y-6">
+
+      {/* ── Discussion Question ── */}
+      <Section title="Discussion Question">
+        <Textarea
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          rows={4}
+          placeholder="Paste the discussion question / prompt here..."
+          className="text-sm"
+        />
+        <Button size="sm" onClick={saveMeta} disabled={savingMeta}>
+          {savingMeta ? "Saving..." : "Save"}
+        </Button>
+      </Section>
+
+      {/* ── Pedoman Penilaian ── */}
+      <Section title={`Pedoman Penilaian${totalMax > 0 ? ` (Total: ${totalMax})` : ""}`}>
+        <div className="space-y-2">
+          {pedomanItems.map((item, i) => (
+            <div key={item.id} className="flex items-start gap-2">
+              <div className="flex-1">
+                <Textarea
+                  value={item.criteria}
+                  onChange={(e) => updatePedomanItem(i, "criteria", e.target.value)}
+                  rows={2}
+                  placeholder={`Kriteria ${i + 1}…`}
+                  className="text-sm"
+                />
+              </div>
+              <div className="flex flex-col items-center gap-1 shrink-0">
+                <label className="text-xs text-muted-foreground whitespace-nowrap">Maks.</label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={item.maxScore}
+                  onChange={(e) => updatePedomanItem(i, "maxScore", Number(e.target.value))}
+                  className="w-20 text-center text-sm"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => removePedomanItem(i)}
+                disabled={pedomanItems.length === 1}
+                className="mt-6 text-muted-foreground hover:text-destructive disabled:opacity-30 text-sm leading-none"
+                title="Remove"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+          <div className="flex items-center gap-3 pt-1">
+            <Button type="button" size="sm" variant="outline" onClick={addPedomanItem}>
+              + Add criterion
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              Total maks. <strong>{totalMax}</strong> poin
+            </span>
+          </div>
+        </div>
+        <Button size="sm" onClick={saveMeta} disabled={savingMeta}>
+          {savingMeta ? "Saving..." : "Save"}
+        </Button>
+      </Section>
+
       {/* Controls */}
       <div className="rounded-lg border p-4 space-y-4">
         <div className="flex items-center gap-3 flex-wrap">
@@ -771,6 +926,8 @@ export function DiskusiActions({
           selectedPosts={activeUnreplied}
           promptPost={posts.find((p) => p.depth === 0)}
           discussionTitle={posts.find((p) => p.depth === 0)?.subject || "Diskusi"}
+          question={question}
+          pedomanItems={pedomanItems}
           onLoadDrafts={loadAiDrafts}
         />
       )}

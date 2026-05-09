@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getCredential } from "@/lib/credentials";
 import { getCourse } from "@/lib/courses";
-import { getSessionDiscussion, listSessionPosts } from "@/lib/session-diskusi";
+import { getSessionDiscussion, listSessionPosts, getDiskusiMeta } from "@/lib/session-diskusi";
 import { listSessions } from "@/lib/sessions";
 import { Badge } from "@/components/ui/badge";
 import { DiskusiActions } from "./diskusi-actions";
@@ -17,12 +17,13 @@ export default async function SessionDiscussionDetailPage({
 }) {
   const { id, courseId, forumId, discId } = await params;
 
-  const [cred, course, discussion, posts, sessions] = await Promise.all([
+  const [cred, course, discussion, posts, sessions, meta] = await Promise.all([
     getCredential(id),
     getCourse(id, courseId),
     getSessionDiscussion(id, courseId, forumId, discId),
     listSessionPosts(id, courseId, forumId, discId),
     listSessions(id, courseId),
+    getDiskusiMeta(id, courseId, forumId, discId),
   ]);
 
   if (!cred || !course || !discussion) notFound();
@@ -112,6 +113,7 @@ export default async function SessionDiscussionDetailPage({
         discId={discId}
         discussionUrl={discussion.url}
         posts={posts}
+        initialMeta={meta}
       />
     </div>
   );

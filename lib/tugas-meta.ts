@@ -14,20 +14,27 @@ function docRef(credentialId: string, courseId: string, assignId: string) {
     .doc(assignId);
 }
 
+function genId(): string {
+  return Math.random().toString(36).slice(2, 8);
+}
+
 function parsePedomanItems(data: FirebaseFirestore.DocumentData): PedomanItem[] {
-  // New format: pedomanItems array
   if (Array.isArray(data.pedomanItems)) {
-    return data.pedomanItems.filter(
-      (item: unknown): item is PedomanItem =>
-        typeof item === "object" &&
-        item !== null &&
-        typeof (item as PedomanItem).criteria === "string" &&
-        typeof (item as PedomanItem).maxScore === "number",
-    );
+    return data.pedomanItems
+      .filter(
+        (item: unknown): item is Record<string, unknown> =>
+          typeof item === "object" && item !== null,
+      )
+      .filter((item) => typeof item.criteria === "string" && typeof item.maxScore === "number")
+      .map((item) => ({
+        id: typeof item.id === "string" && item.id ? item.id : genId(),
+        criteria: item.criteria as string,
+        maxScore: item.maxScore as number,
+      }));
   }
-  // Legacy: pedomanScore was a free-text string — migrate to single item
+  // Legacy: pedomanScore free-text → single item
   if (typeof data.pedomanScore === "string" && data.pedomanScore.trim()) {
-    return [{ criteria: data.pedomanScore, maxScore: 100 }];
+    return [{ id: genId(), criteria: data.pedomanScore, maxScore: 100 }];
   }
   return [];
 }

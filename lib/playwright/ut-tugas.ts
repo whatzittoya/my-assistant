@@ -13,6 +13,7 @@ async function downloadFile(
   credentialId: string,
   assignId: string,
   filename: string,
+  userId: string,
 ): Promise<string | null> {
   try {
     const response = await page.context().request.get(url);
@@ -23,15 +24,17 @@ async function downloadFile(
     const dir = path.join(FILES_BASE, credentialId, assignId);
     fs.mkdirSync(dir, { recursive: true });
 
-    const rawPath = path.join(dir, filename);
+    const prefixedFilename = `${userId}_${filename}`;
+    const rawPath = path.join(dir, prefixedFilename);
     fs.writeFileSync(rawPath, await response.body());
-    logger.ok(`Downloaded: ${filename}`);
+    logger.ok(`Downloaded: ${prefixedFilename}`);
 
     // Convert Office files to PDF immediately so they're viewable
     const ext = path.extname(filename).toLowerCase();
     if (OFFICE_EXTS.has(ext)) {
       try {
         const pdfPath = convertToPdf(rawPath);
+        fs.unlinkSync(rawPath);
         return path.relative(FILES_BASE, pdfPath);
       } catch (e) {
         logger.warn(`PDF conversion failed, keeping original: ${e instanceof Error ? e.message : String(e)}`);
@@ -49,28 +52,40 @@ export async function scrapeTugasSubmissions(
   page: Page,
   assignId: string,
   credentialId: string,
+  downloadFiles = true,
 ): Promise<Omit<TugasSubmission, "collectedAt">[]> {
+  if (downloadFiles) {
+    // Clear stale files from previous fetch
+    const assignDir = path.join(FILES_BASE, credentialId, assignId);
+    if (fs.existsSync(assignDir)) {
+      fs.rmSync(assignDir, { recursive: true, force: true });
+      logger.info(`Cleared old files: ${assignDir}`);
+    }
+  }
+
   const gradingUrl = `https://elearning.ut.ac.id/mod/assign/view.php?id=${assignId}&action=grading`;
   logger.info(`Navigating to grading page: ${gradingUrl}`);
-  await page.goto(gradingUrl, { waitUntil: "domcontentloaded" });
+  await page.goto(gradingUrl, { waitUntil: "networkidle", timeout: 60000 });
 
   // Set perpage = All (-1) — triggers auto-submit via onchange
   logger.info("Setting perpage=All");
+  await page.waitForSelector("#id_perpage", { timeout: 30000 });
   await Promise.all([
-    page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 30000 }),
+    page.waitForNavigation({ waitUntil: "networkidle", timeout: 60000 }),
     page.selectOption("#id_perpage", "-1"),
   ]);
 
   // Set filter = submitted
   logger.info("Setting filter=submitted");
+  await page.waitForSelector("#id_filter", { timeout: 30000 });
   await Promise.all([
-    page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 30000 }),
+    page.waitForNavigation({ waitUntil: "networkidle", timeout: 60000 }),
     page.selectOption("#id_filter", "submitted"),
   ]);
 
-  // Wait for table
+  // Wait for table rows to be present (not just the table shell)
   const tableExists = await page
-    .waitForSelector("table.flexible.table", { timeout: 20000 })
+    .waitForSelector("table.flexible tbody tr[id^='mod_assign_grading-']", { timeout: 30000 })
     .then(() => true)
     .catch(() => false);
 
@@ -79,7 +94,7 @@ export async function scrapeTugasSubmissions(
     return [];
   }
 
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(800);
 
   const rows = await page.$$("table.flexible tbody tr[id^='mod_assign_grading-']");
   logger.info(`Found ${rows.length} submitted rows`);
@@ -136,11 +151,13 @@ export async function scrapeTugasSubmissions(
       .$eval(".cell.c10", (el) => el.textContent?.trim() ?? "")
       .catch(() => "");
 
-    // finalGrade from c11
+    // finalGrade from c11 — e.g. "87.00 / 100.00" → 87, or "-" → null
     const finalGrade = await row
       .$eval(".cell.c11", (el) => {
-        const t = el.textContent?.trim() ?? "";
-        return t === "-" || t === "" ? null : t;
+        const t = el.textContent?.replace(/\u00a0/g, " ").trim() ?? "";
+        if (t === "-" || t === "") return null;
+        const num = parseFloat(t.split("/")[0].trim());
+        return isNaN(num) ? null : num;
       })
       .catch(() => null);
 
@@ -162,12 +179,15 @@ export async function scrapeTugasSubmissions(
       })
       .catch(() => [] as { filename: string; url: string; submittedAt: string }[]);
 
-    // Download each file
+    // Download each file (skipped if downloadFiles=false)
     const files: TugasFile[] = [];
     for (const rf of rawFiles) {
       if (!rf.url || !rf.filename) continue;
-      const localPath = await downloadFile(page, rf.url, credentialId, assignId, rf.filename);
-      files.push({ filename: rf.filename, url: rf.url, submittedAt: rf.submittedAt, localPath });
+      const localPath = downloadFiles
+        ? await downloadFile(page, rf.url, credentialId, assignId, rf.filename, userId)
+        : null;
+      const filename = localPath ? path.basename(localPath) : rf.filename;
+      files.push({ filename, url: rf.url, submittedAt: rf.submittedAt, localPath });
     }
 
     logger.ok(`${name}: ${files.length} file(s)`);
