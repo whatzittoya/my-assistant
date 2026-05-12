@@ -22,12 +22,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import type { TugasSubmission, TugasMeta, PedomanItem, CriteriaScore } from "@/types";
 import type { Skill } from "@/lib/skills";
 
@@ -49,6 +43,8 @@ type EvalResult = {
   feedback: string;
   error?: string;
 };
+
+type TugasCollectScope = "all" | "requiresGrading";
 
 function genId() {
   return Math.random().toString(36).slice(2, 8);
@@ -209,6 +205,22 @@ function statusBadge(status: string) {
   if (lower.includes("submitted"))
     return <Badge variant="outline" className="border-green-400 text-green-700 dark:text-green-300 text-xs">Submitted</Badge>;
   return <Badge variant="secondary" className="text-xs">{status}</Badge>;
+}
+
+function isGradedSubmission(submission: TugasSubmission) {
+  const status = submission.status.toLowerCase();
+  if (status.includes("graded")) return true;
+  if (status.includes("submitted")) return false;
+
+  return submission.finalGrade != null || !!submission.grade;
+}
+
+function sortSubmissions(a: TugasSubmission, b: TugasSubmission) {
+  const aGraded = isGradedSubmission(a);
+  const bGraded = isGradedSubmission(b);
+  if (aGraded !== bGraded) return aGraded ? 1 : -1;
+
+  return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
 }
 
 // ── Section box ───────────────────────────────────────────────────────────────
@@ -475,6 +487,8 @@ export function TugasActions({
   const [submissions, setSubmissions] = useState<TugasSubmission[]>(initialSubmissions);
   const [collecting, setCollecting] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [downloadFiles, setDownloadFiles] = useState(true);
+  const [collectScope, setCollectScope] = useState<TugasCollectScope>("requiresGrading");
 
   const [skills, setSkills] = useState<Skill[]>([]);
   const [skillId, setSkillId] = useState("");
@@ -489,7 +503,7 @@ export function TugasActions({
   const [savingMeta, setSavingMeta] = useState(false);
 
   const [selected, setSelected] = useState<Set<string>>(
-    new Set(initialSubmissions.map((s) => s.userId)),
+    new Set(initialSubmissions.filter((s) => !isGradedSubmission(s)).map((s) => s.userId)),
   );
 
   const [viewingFile, setViewingFile] = useState<ViewingFile | null>(null);
@@ -514,6 +528,13 @@ export function TugasActions({
   useEffect(() => {
     try { localStorage.setItem(lsKey, JSON.stringify(results)); } catch { /* quota */ }
   }, [results, lsKey]);
+
+  useEffect(() => {
+    const selectable = new Set(
+      submissions.filter((s) => !isGradedSubmission(s)).map((s) => s.userId),
+    );
+    setSelected((prev) => new Set([...prev].filter((userId) => selectable.has(userId))));
+  }, [submissions]);
 
   useEffect(() => {
     fetch("/api/skills")
@@ -574,13 +595,13 @@ export function TugasActions({
 
   // ── Collect ────────────────────────────────────────────────────────────────
 
-  async function collect(downloadFiles = true) {
+  async function collect() {
     setCollecting(true);
     try {
       const res = await fetch("/api/actions/tugas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ credentialId, courseId, assignId, downloadFiles }),
+        body: JSON.stringify({ credentialId, courseId, assignId, downloadFiles, collectScope }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Failed");
@@ -591,7 +612,7 @@ export function TugasActions({
       if (listRes.ok) {
         const items = (await listRes.json()).items ?? [];
         setSubmissions(items);
-        setSelected(new Set(items.filter((s: TugasSubmission) => !s.status.toLowerCase().includes("graded")).map((s: TugasSubmission) => s.userId)));
+        setSelected(new Set(items.filter((s: TugasSubmission) => !isGradedSubmission(s)).map((s: TugasSubmission) => s.userId)));
       }
       toast.success(`Collected ${json.count} submission${json.count !== 1 ? "s" : ""}`);
     } catch (e) {
@@ -709,7 +730,7 @@ export function TugasActions({
     });
   }
 
-  function selectAll() { setSelected(new Set(submissions.filter((s) => !s.status.toLowerCase().includes("graded")).map((s) => s.userId))); }
+  function selectAll() { setSelected(new Set(submissions.filter((s) => !isGradedSubmission(s)).map((s) => s.userId))); }
   function unselectAll() { setSelected(new Set()); }
 
   function toggleExpand(userId: string) {
@@ -848,7 +869,7 @@ export function TugasActions({
   async function postGrades() {
     // Collect not-graded submissions that have a finalEval or aiEval score
     const toPost = submissions
-      .filter((s) => !s.status.toLowerCase().includes("graded"))
+      .filter((s) => !isGradedSubmission(s))
       .flatMap((s) => {
         const eval_ = s.finalEval ?? s.aiEval;
         if (!eval_) return [];
@@ -883,7 +904,13 @@ export function TugasActions({
       const recollectRes = await fetch("/api/actions/tugas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ credentialId, courseId, assignId, downloadFiles: false }),
+        body: JSON.stringify({
+          credentialId,
+          courseId,
+          assignId,
+          downloadFiles: false,
+          collectScope: "all",
+        }),
       });
       if (recollectRes.ok) {
         const listRes = await fetch(
@@ -902,10 +929,11 @@ export function TugasActions({
     }
   }
 
-  const ungraded = submissions.filter((s) => !s.finalGrade && !s.grade).length;
+  const ungraded = submissions.filter((s) => !isGradedSubmission(s)).length;
+  const sortedSubmissions = [...submissions].sort(sortSubmissions);
   const withFiles = submissions.filter((s) => s.files.some((f) => f.localPath));
   const selectedWithFiles = withFiles.filter((s) => selected.has(s.userId));
-  const selectableSubmissions = submissions.filter((s) => !s.status.toLowerCase().includes("graded"));
+  const selectableSubmissions = submissions.filter((s) => !isGradedSubmission(s));
   const allSelected = selectableSubmissions.length > 0 && selected.size === selectableSubmissions.length;
 
   const sidebarResult = viewingFile ? results.find((r) => r.userId === viewingFile.userId) : null;
@@ -914,69 +942,87 @@ export function TugasActions({
     <div className="flex gap-4 items-start">
     <div className="flex-1 min-w-0 space-y-4">
 
-      {/* ── Controls ── */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex">
-          <Button
-            className="rounded-r-none"
-            onClick={() => collect(true)}
-            disabled={collecting || deleting}
-          >
-            {collecting ? "Collecting..." : submissions.length > 0 ? "Re-collect" : "Collect submissions"}
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                className="rounded-l-none border-l-0 px-2"
-                disabled={collecting || deleting}
-              >
-                ▾
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              <DropdownMenuItem onClick={() => collect(true)}>
-                Re-collect &amp; download files
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => collect(false)}>
-                Re-collect without downloading files
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-        {submissions.length > 0 && (
-          <>
-            <Button variant="outline" onClick={deleteAndRescrape} disabled={collecting || deleting}>
-              {deleting && !collecting ? "Deleting..." : "Delete & Rescrape"}
+      {/* ── Collect ── */}
+      <Section title="Collect">
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <Button onClick={collect} disabled={collecting || deleting}>
+              {collecting ? "Collecting..." : submissions.length > 0 ? "Re-collect" : "Collect submissions"}
             </Button>
-            <Button variant="destructive" size="sm" onClick={deleteAll} disabled={collecting || deleting}>
-              Delete
-            </Button>
-          </>
-        )}
-        <a href={tugasUrl} target="_blank" rel="noreferrer" className="text-xs text-muted-foreground hover:underline">
-          Open on UT ↗
-        </a>
-        {submissions.length > 0 && (
-          <>
-            <Badge variant="secondary">{submissions.length} submitted</Badge>
-            {ungraded > 0 && (
-              <Badge variant="outline" className="border-amber-400 text-amber-700 dark:text-amber-300">
-                {ungraded} not graded
-              </Badge>
-            )}
-            {(() => {
-              const postable = submissions.filter(
-                (s) => !s.status.toLowerCase().includes("graded") && (s.finalEval ?? s.aiEval),
-              ).length;
-              return postable > 0 ? (
-                <Button size="sm" onClick={postGrades} disabled={posting}>
-                  {posting ? "Posting..." : `Post to UT (${postable})`}
+            {submissions.length > 0 && (
+              <>
+                <Button variant="outline" onClick={deleteAndRescrape} disabled={collecting || deleting}>
+                  {deleting && !collecting ? "Deleting..." : "Delete & Rescrape"}
                 </Button>
-              ) : null;
-            })()}
-          </>
-        )}
-      </div>
+                <Button variant="destructive" size="sm" onClick={deleteAll} disabled={collecting || deleting}>
+                  Delete
+                </Button>
+              </>
+            )}
+            <a href={tugasUrl} target="_blank" rel="noreferrer" className="text-xs text-muted-foreground hover:underline">
+              Open on UT ↗
+            </a>
+            {submissions.length > 0 && (
+              <>
+                <Badge variant="secondary">{submissions.length} collected</Badge>
+                {ungraded > 0 && (
+                  <Badge variant="outline" className="border-amber-400 text-amber-700 dark:text-amber-300">
+                    {ungraded} not graded
+                  </Badge>
+                )}
+                {(() => {
+                  const postable = submissions.filter(
+                    (s) => !isGradedSubmission(s) && (s.finalEval ?? s.aiEval),
+                  ).length;
+                  return postable > 0 ? (
+                    <Button size="sm" onClick={postGrades} disabled={posting}>
+                      {posting ? "Posting..." : `Post to UT (${postable})`}
+                    </Button>
+                  ) : null;
+                })()}
+              </>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input
+                type="checkbox"
+                checked={downloadFiles}
+                onChange={(e) => setDownloadFiles(e.target.checked)}
+                disabled={collecting || deleting}
+              />
+              Download files
+            </label>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-sm font-medium text-muted-foreground">Students</span>
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="radio"
+                  name="tugas-collect-scope"
+                  value="requiresGrading"
+                  checked={collectScope === "requiresGrading"}
+                  onChange={() => setCollectScope("requiresGrading")}
+                  disabled={collecting || deleting}
+                />
+                Requires grading
+              </label>
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="radio"
+                  name="tugas-collect-scope"
+                  value="all"
+                  checked={collectScope === "all"}
+                  onChange={() => setCollectScope("all")}
+                  disabled={collecting || deleting}
+                />
+                All students
+              </label>
+            </div>
+          </div>
+        </div>
+      </Section>
 
       {/* ── Skill + Model ── */}
       <Section title="Skill & Model">
@@ -1113,13 +1159,13 @@ export function TugasActions({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {submissions.map((s) => {
+                {sortedSubmissions.map((s) => {
                   const result = results.find((r) => r.userId === s.userId);
                   const aiScore = result?.totalScore ?? s.aiEval?.totalScore;
                   const finalScore = s.finalEval?.totalScore;
                   const isExpanded = expandedRows.has(s.userId);
 
-                  const isGraded = s.status.toLowerCase().includes("graded");
+                  const isGraded = isGradedSubmission(s);
 
                   return (
                     <React.Fragment key={s.userId}>

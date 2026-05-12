@@ -19,7 +19,6 @@ import type { Discussion, Session } from "@/types";
 export function CourseActions({
   credentialId,
   courseId,
-  courseUrl,
   hasForumUrl,
   initialDiscussions,
   initialSessions,
@@ -113,7 +112,7 @@ export function CourseActions({
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-3">
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
@@ -121,7 +120,7 @@ export function CourseActions({
               {forumFound && <Badge variant="default">Found</Badge>}
             </div>
             <CardDescription>
-              Locates "Forum Perkenalan" link on the course page.
+              Locates Forum Perkenalan link on the course page.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -157,6 +156,20 @@ export function CourseActions({
             >
               {refreshBusy ? "Refreshing..." : "Refresh"}
             </Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Score monitor</CardTitle>
+            <CardDescription>
+              Compares gradebook scores with collected Diskusi and Tugas activity.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Link href={`/credentials/${credentialId}/courses/${courseId}/scores`}>
+              <Button variant="outline">Open scores</Button>
+            </Link>
           </CardContent>
         </Card>
       </div>

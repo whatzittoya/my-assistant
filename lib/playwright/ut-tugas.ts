@@ -7,6 +7,13 @@ import type { TugasFile, TugasSubmission } from "@/types";
 
 const FILES_BASE = path.join(process.cwd(), ".tugas-files");
 
+export type TugasCollectScope = "all" | "requiresGrading";
+
+const FILTER_VALUE: Record<TugasCollectScope, string> = {
+  all: "none",
+  requiresGrading: "requiregrading",
+};
+
 async function downloadFile(
   page: Page,
   url: string,
@@ -53,9 +60,11 @@ export async function scrapeTugasSubmissions(
   assignId: string,
   credentialId: string,
   downloadFiles = true,
+  collectScope: TugasCollectScope = "all",
 ): Promise<Omit<TugasSubmission, "collectedAt">[]> {
-  if (downloadFiles) {
-    // Clear stale files from previous fetch
+  if (downloadFiles && collectScope === "all") {
+    // Full download refresh replaces the assignment's local cache.
+    // Partial refreshes keep existing files for students outside the filter.
     const assignDir = path.join(FILES_BASE, credentialId, assignId);
     if (fs.existsSync(assignDir)) {
       fs.rmSync(assignDir, { recursive: true, force: true });
@@ -75,12 +84,13 @@ export async function scrapeTugasSubmissions(
     page.selectOption("#id_perpage", "-1"),
   ]);
 
-  // Set filter = submitted
-  logger.info("Setting filter=submitted");
+  // Set grading table filter.
+  const filterValue = FILTER_VALUE[collectScope];
+  logger.info(`Setting filter=${filterValue}`);
   await page.waitForSelector("#id_filter", { timeout: 30000 });
   await Promise.all([
     page.waitForNavigation({ waitUntil: "networkidle", timeout: 60000 }),
-    page.selectOption("#id_filter", "submitted"),
+    page.selectOption("#id_filter", filterValue),
   ]);
 
   // Wait for table rows to be present (not just the table shell)
@@ -97,7 +107,7 @@ export async function scrapeTugasSubmissions(
   await page.waitForTimeout(800);
 
   const rows = await page.$$("table.flexible tbody tr[id^='mod_assign_grading-']");
-  logger.info(`Found ${rows.length} submitted rows`);
+  logger.info(`Found ${rows.length} rows`);
 
   const submissions: Omit<TugasSubmission, "collectedAt">[] = [];
 

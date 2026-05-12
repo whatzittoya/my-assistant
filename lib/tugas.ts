@@ -94,6 +94,52 @@ function toSubmission(id: string, data: FirebaseFirestore.DocumentData): TugasSu
   };
 }
 
+function normalizeFileUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    parsed.searchParams.delete("forcedownload");
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+function mergeExistingFilePaths(
+  incoming: TugasFile[],
+  existing: TugasFile[],
+): TugasFile[] {
+  const byUrl = new Map(existing.map((file) => [normalizeFileUrl(file.url), file]));
+
+  return incoming.map((file) => {
+    if (file.localPath) return file;
+
+    const previous = byUrl.get(normalizeFileUrl(file.url));
+    if (!previous?.localPath) return file;
+
+    return {
+      ...file,
+      filename: previous.filename || file.filename,
+      localPath: previous.localPath,
+    };
+  });
+}
+
+function hasUtGrade(submission: TugasSubmission): boolean {
+  const status = submission.status.toLowerCase();
+  if (status.includes("graded")) return true;
+  if (status.includes("submitted")) return false;
+
+  return submission.finalGrade != null || !!submission.grade;
+}
+
+function sortTugasSubmissions(a: TugasSubmission, b: TugasSubmission): number {
+  const aGraded = hasUtGrade(a);
+  const bGraded = hasUtGrade(b);
+  if (aGraded !== bGraded) return aGraded ? 1 : -1;
+
+  return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+}
+
 export async function listTugasSubmissions(
   credentialId: string,
   courseId: string,
@@ -102,7 +148,7 @@ export async function listTugasSubmissions(
   const snap = await subCol(credentialId, courseId, assignId)
     .orderBy("name", "asc")
     .get();
-  return snap.docs.map((d) => toSubmission(d.id, d.data()));
+  return snap.docs.map((d) => toSubmission(d.id, d.data())).sort(sortTugasSubmissions);
 }
 
 export async function getSubmission(
@@ -168,10 +214,26 @@ export async function saveTugasSubmissions(
   courseId: string,
   assignId: string,
   submissions: Omit<TugasSubmission, "collectedAt" | "aiEval" | "finalEval">[],
+  options: { preserveExistingFilePaths?: boolean } = {},
 ): Promise<void> {
   const col = subCol(credentialId, courseId, assignId);
+  const existingFilesByUserId = new Map<string, TugasFile[]>();
+
+  if (options.preserveExistingFilePaths && submissions.length > 0) {
+    const existingDocs = await db().getAll(...submissions.map((s) => col.doc(s.userId)));
+    for (const doc of existingDocs) {
+      if (!doc.exists) continue;
+      const files = (doc.data()!.files ?? []).map(toFile);
+      existingFilesByUserId.set(doc.id, files);
+    }
+  }
+
   const batch = db().batch();
   for (const s of submissions) {
+    const files = options.preserveExistingFilePaths
+      ? mergeExistingFilePaths(s.files, existingFilesByUserId.get(s.userId) ?? [])
+      : s.files;
+
     batch.set(
       col.doc(s.userId),
       {
@@ -183,7 +245,7 @@ export async function saveTugasSubmissions(
         lastModifiedGrade: s.lastModifiedGrade ?? null,
         feedbackComment: s.feedbackComment,
         finalGrade: s.finalGrade ?? null,
-        files: s.files.map((f) => ({
+        files: files.map((f) => ({
           filename: f.filename,
           url: f.url,
           submittedAt: f.submittedAt,

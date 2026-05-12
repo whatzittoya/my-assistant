@@ -121,3 +121,62 @@ export type Post = {
   ratingCount: number | null; // number of raters
   iRepliedToThis: boolean;    // lecturer has a child reply under this post
 };
+
+export type GradebookItemKind = "diskusi" | "tugas";
+
+export type GradebookItem = {
+  itemId: string;
+  kind: GradebookItemKind;
+  name: string;
+  url: string;
+  activityId: string;
+};
+
+export type GradebookStudentGrade = {
+  itemId: string;
+  value: string | null;
+  feedback: string | null;
+};
+
+export type GradebookStudent = {
+  uid: string;
+  name: string;
+  email: string;
+  studentNo: string | null;
+  grades: GradebookStudentGrade[];
+};
+
+export type GradebookSnapshot = {
+  courseId: string;
+  sourceUrl: string;
+  items: GradebookItem[];
+  students: GradebookStudent[];
+  collectedAt: string;
+};
+
+export type ScoreMonitorEvidence = {
+  exists: boolean;
+  source: "diskusi" | "tugas";
+  userId: string | null;
+  studentNo: string | null;
+  title: string;
+  url: string;
+  detail: string;
+  hasTutorReply?: boolean;
+};
+
+export type ScoreMonitorRow = {
+  item: GradebookItem;
+  student: GradebookStudent;
+  lmsGrade: string | null;
+  feedback: string | null;
+  evidence: ScoreMonitorEvidence | null;
+  missingScore: boolean;
+};
+
+export type ScoreMonitorSummary = {
+  totalRows: number;
+  missingScores: number;
+  missingDiskusi: number;
+  missingTugas: number;
+};

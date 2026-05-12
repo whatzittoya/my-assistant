@@ -172,7 +172,7 @@ function InlineDraftCard({
       </div>
       {hasEmDash(result.draft) && (
         <p className="text-xs text-orange-600 dark:text-orange-400">
-          ⚠ Em dash (—) found — will be replaced with " - " on post.
+          Em dash found and will be replaced with - on post.
         </p>
       )}
       <Textarea
@@ -445,7 +445,7 @@ function ExportDialog({
           {tab === "upload" && (
             <>
               <p className="text-xs text-muted-foreground">
-                Paste the AI's JSON response. Preview, then load as drafts.
+                Paste the AI JSON response. Preview, then load as drafts.
               </p>
               <Textarea
                 value={uploadText}

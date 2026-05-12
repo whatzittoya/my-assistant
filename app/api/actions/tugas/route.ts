@@ -13,6 +13,7 @@ const Body = z.object({
   courseId: z.string().min(1),
   assignId: z.string().min(1),
   downloadFiles: z.boolean().optional().default(true),
+  collectScope: z.enum(["all", "requiresGrading"]).optional().default("all"),
 });
 
 export async function POST(req: Request) {
@@ -20,14 +21,24 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  const { credentialId, courseId, assignId, downloadFiles } = parsed.data;
+  const { credentialId, courseId, assignId, downloadFiles, collectScope } = parsed.data;
 
   try {
     const session = await getSession(credentialId);
-    logger.info(`Collecting tugas ${assignId}${downloadFiles ? "" : " (skip file download)"}`);
+    logger.info(
+      `Collecting tugas ${assignId} (${collectScope})${downloadFiles ? "" : " (skip file download)"}`,
+    );
 
-    const submissions = await scrapeTugasSubmissions(session.page, assignId, credentialId, downloadFiles);
-    await saveTugasSubmissions(credentialId, courseId, assignId, submissions);
+    const submissions = await scrapeTugasSubmissions(
+      session.page,
+      assignId,
+      credentialId,
+      downloadFiles,
+      collectScope,
+    );
+    await saveTugasSubmissions(credentialId, courseId, assignId, submissions, {
+      preserveExistingFilePaths: !downloadFiles || collectScope !== "all",
+    });
 
     logger.ok(`Collected ${submissions.length} submissions for tugas ${assignId}`);
     return NextResponse.json({ ok: true, count: submissions.length });

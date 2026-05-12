@@ -65,7 +65,7 @@ export function ReplyDraft({ credentialId, courseId, discussionId, initialDraft 
 
       {!draft && !generating && (
         <p className="text-xs text-muted-foreground">
-          Click "Generate reply" to get a draft from Gemini.
+          Click Generate reply to get a draft from Gemini.
         </p>
       )}
     </div>
