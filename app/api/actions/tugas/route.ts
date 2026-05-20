@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/playwright/session";
-import { scrapeTugasSubmissions } from "@/lib/playwright/ut-tugas";
+import { scrapeTugasSubmissions, buildAssignFolderName } from "@/lib/playwright/ut-tugas";
 import { saveTugasSubmissions } from "@/lib/tugas";
+import { getCourse } from "@/lib/courses";
+import { listSessions } from "@/lib/sessions";
 import { logger } from "@/lib/activity-log";
 
 export const runtime = "nodejs";
@@ -29,12 +31,22 @@ export async function POST(req: Request) {
       `Collecting tugas ${assignId} (${collectScope})${downloadFiles ? "" : " (skip file download)"}`,
     );
 
+    const [course, sessions] = await Promise.all([
+      getCourse(credentialId, courseId),
+      listSessions(credentialId, courseId),
+    ]);
+    const tugasActivity = sessions
+      .flatMap((s) => s.tugas)
+      .find((t) => t.url.includes(`id=${assignId}`));
+    const folderName = buildAssignFolderName(assignId, course?.name, tugasActivity?.name);
+
     const submissions = await scrapeTugasSubmissions(
       session.page,
       assignId,
       credentialId,
       downloadFiles,
       collectScope,
+      folderName,
     );
     await saveTugasSubmissions(credentialId, courseId, assignId, submissions, {
       preserveExistingFilePaths: !downloadFiles || collectScope !== "all",

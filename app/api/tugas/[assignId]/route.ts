@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server";
 import * as fs from "fs";
-import * as path from "path";
 import { listTugasSubmissions, deleteTugasSubmissions } from "@/lib/tugas";
+import { findAssignDir } from "@/lib/playwright/ut-tugas";
 
 export const dynamic = "force-dynamic";
-
-const FILES_BASE = path.join(process.cwd(), ".tugas-files");
 
 export async function GET(
   req: Request,
@@ -47,8 +45,8 @@ export async function DELETE(
     const count = await deleteTugasSubmissions(credentialId, courseId, assignId);
 
     // Delete local files
-    const filesDir = path.join(FILES_BASE, credentialId, assignId);
-    if (fs.existsSync(filesDir)) {
+    const filesDir = findAssignDir(credentialId, assignId);
+    if (filesDir && fs.existsSync(filesDir)) {
       fs.rmSync(filesDir, { recursive: true, force: true });
     }
 

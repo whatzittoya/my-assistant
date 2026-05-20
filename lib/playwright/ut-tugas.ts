@@ -10,15 +10,45 @@ const FILES_BASE = path.join(process.cwd(), ".tugas-files");
 export type TugasCollectScope = "all" | "requiresGrading";
 
 const FILTER_VALUE: Record<TugasCollectScope, string> = {
-  all: "none",
+  all: "submitted",
   requiresGrading: "requiregrading",
 };
+
+function sanitizeForFolder(s: string): string {
+  return s
+    .replace(/[\/\\:*?"<>|\x00-\x1f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80);
+}
+
+export function buildAssignFolderName(
+  assignId: string,
+  courseName?: string | null,
+  tugasName?: string | null,
+): string {
+  const parts = [assignId];
+  if (courseName) parts.push(sanitizeForFolder(courseName));
+  if (tugasName) parts.push(sanitizeForFolder(tugasName));
+  return parts.join(" - ");
+}
+
+export function findAssignDir(credentialId: string, assignId: string): string | null {
+  const base = path.join(FILES_BASE, credentialId);
+  if (!fs.existsSync(base)) return null;
+  const exact = path.join(base, assignId);
+  if (fs.existsSync(exact) && fs.statSync(exact).isDirectory()) return exact;
+  const prefix = `${assignId} - `;
+  const entries = fs.readdirSync(base, { withFileTypes: true });
+  const hit = entries.find((e) => e.isDirectory() && e.name.startsWith(prefix));
+  return hit ? path.join(base, hit.name) : null;
+}
 
 async function downloadFile(
   page: Page,
   url: string,
   credentialId: string,
-  assignId: string,
+  folderName: string,
   filename: string,
   userId: string,
 ): Promise<string | null> {
@@ -28,7 +58,7 @@ async function downloadFile(
       logger.warn(`Download failed (${response.status()}): ${filename}`);
       return null;
     }
-    const dir = path.join(FILES_BASE, credentialId, assignId);
+    const dir = path.join(FILES_BASE, credentialId, folderName);
     fs.mkdirSync(dir, { recursive: true });
 
     const prefixedFilename = `${userId}_${filename}`;
@@ -61,14 +91,23 @@ export async function scrapeTugasSubmissions(
   credentialId: string,
   downloadFiles = true,
   collectScope: TugasCollectScope = "all",
+  folderName: string = assignId,
 ): Promise<Omit<TugasSubmission, "collectedAt">[]> {
   if (downloadFiles && collectScope === "all") {
     // Full download refresh replaces the assignment's local cache.
     // Partial refreshes keep existing files for students outside the filter.
-    const assignDir = path.join(FILES_BASE, credentialId, assignId);
-    if (fs.existsSync(assignDir)) {
-      fs.rmSync(assignDir, { recursive: true, force: true });
-      logger.info(`Cleared old files: ${assignDir}`);
+    // Clear both the new-format dir and any legacy bare-assignId dir.
+    const candidates = new Set<string>([
+      path.join(FILES_BASE, credentialId, folderName),
+      path.join(FILES_BASE, credentialId, assignId),
+    ]);
+    const existing = findAssignDir(credentialId, assignId);
+    if (existing) candidates.add(existing);
+    for (const dir of candidates) {
+      if (fs.existsSync(dir)) {
+        fs.rmSync(dir, { recursive: true, force: true });
+        logger.info(`Cleared old files: ${dir}`);
+      }
     }
   }
 
@@ -194,7 +233,7 @@ export async function scrapeTugasSubmissions(
     for (const rf of rawFiles) {
       if (!rf.url || !rf.filename) continue;
       const localPath = downloadFiles
-        ? await downloadFile(page, rf.url, credentialId, assignId, rf.filename, userId)
+        ? await downloadFile(page, rf.url, credentialId, folderName, rf.filename, userId)
         : null;
       const filename = localPath ? path.basename(localPath) : rf.filename;
       files.push({ filename, url: rf.url, submittedAt: rf.submittedAt, localPath });
