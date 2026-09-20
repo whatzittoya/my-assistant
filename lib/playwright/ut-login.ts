@@ -6,7 +6,7 @@ const DASHBOARD_URL = "https://elearning.ut.ac.id/my/";
 
 export async function login(page: Page, username: string, password: string) {
   logger.info(`Navigating to UT login page`);
-  await page.goto(LOGIN_URL, { waitUntil: "domcontentloaded" });
+  await page.goto(LOGIN_URL, { waitUntil: "load" });
 
   if (page.url().startsWith(DASHBOARD_URL)) {
     logger.ok("Already logged in");
@@ -14,19 +14,42 @@ export async function login(page: Page, username: string, password: string) {
   }
 
   logger.info(`Filling credentials for ${username}`);
-  await page.fill("#username", username);
-  await page.fill("#password", password);
+  const myUtLoginButton = page.locator("#btnLoginMyUT");
+  const usesMyUtModal = await myUtLoginButton
+    .waitFor({ state: "visible", timeout: 5_000 })
+    .then(() => true)
+    .catch(() => false);
+
+  let submitButton: string;
+  if (usesMyUtModal) {
+    logger.info("Opening Tutor Eksternal login form");
+    await myUtLoginButton.click();
+    await page.locator("#btnTutorEksternal").click();
+    await page.locator("#username_modal").waitFor({ state: "visible" });
+    await page.fill("#username_modal", username);
+    await page.fill("#password_modal", password);
+    submitButton = "#login-modal button[type='submit']";
+  } else {
+    await page.fill("#username", username);
+    await page.fill("#password", password);
+    submitButton = "#loginbtn";
+  }
 
   logger.info("Submitting login form");
   await Promise.all([
     page.waitForNavigation({ waitUntil: "domcontentloaded" }),
-    page.click("#loginbtn"),
+    page.click(submitButton),
   ]);
 
   const loginError = await page.locator("#loginerrormessage").first().textContent().catch(() => null);
   if (loginError) {
     logger.err(`Login failed: ${loginError.trim()}`);
     throw new Error(`Login failed: ${loginError.trim()}`);
+  }
+
+  if (page.url().includes("/login/")) {
+    logger.err("Login failed: UT stayed on the login page");
+    throw new Error("Login failed: UT stayed on the login page");
   }
 
   if (!page.url().includes("elearning.ut.ac.id")) {

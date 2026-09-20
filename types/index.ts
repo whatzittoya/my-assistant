@@ -18,6 +18,14 @@ export type Course = {
   collectedAt: string;
 };
 
+export type Semester = {
+  id: string;
+  name: string;
+  courseIds: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type Discussion = {
   id: string; // ?d= param
   title: string;

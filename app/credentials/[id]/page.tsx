@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getCredential } from "@/lib/credentials";
 import { listCourses } from "@/lib/courses";
 import { countNeedsReply } from "@/lib/discussions";
+import { listSemesters } from "@/lib/semesters";
 import { Badge } from "@/components/ui/badge";
 import { CredentialActions } from "./actions";
 
@@ -16,8 +17,9 @@ export default async function CredentialDetail({
   const { id } = await params;
   const cred = await getCredential(id);
   if (!cred) notFound();
-  const [courses, needsReplyCount] = await Promise.all([
+  const [courses, semesters, needsReplyCount] = await Promise.all([
     listCourses(id),
+    listSemesters(id),
     countNeedsReply(id),
   ]);
 
@@ -36,7 +38,11 @@ export default async function CredentialDetail({
         </div>
         <p className="text-sm text-muted-foreground">{cred.username}</p>
       </div>
-      <CredentialActions credentialId={cred.id} initialCourses={courses} />
+      <CredentialActions
+        credentialId={cred.id}
+        initialCourses={courses}
+        initialSemesters={semesters}
+      />
     </div>
   );
 }
