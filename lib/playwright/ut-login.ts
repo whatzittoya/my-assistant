@@ -4,9 +4,13 @@ import { logger } from "@/lib/activity-log";
 const LOGIN_URL = "https://elearning.ut.ac.id/login/index.php";
 const DASHBOARD_URL = "https://elearning.ut.ac.id/my/";
 
+// UT's dashboard is heavy and regularly needs more than Playwright's 30s default,
+// especially when a re-login lands in the middle of a long scrape.
+const NAV_TIMEOUT_MS = 90_000;
+
 export async function login(page: Page, username: string, password: string) {
   logger.info(`Navigating to UT login page`);
-  await page.goto(LOGIN_URL, { waitUntil: "load" });
+  await page.goto(LOGIN_URL, { waitUntil: "load", timeout: NAV_TIMEOUT_MS });
 
   if (page.url().startsWith(DASHBOARD_URL)) {
     logger.ok("Already logged in");
@@ -37,7 +41,7 @@ export async function login(page: Page, username: string, password: string) {
 
   logger.info("Submitting login form");
   await Promise.all([
-    page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+    page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS }),
     page.click(submitButton),
   ]);
 
@@ -63,8 +67,27 @@ export async function login(page: Page, username: string, password: string) {
 
 export async function isLoggedIn(page: Page): Promise<boolean> {
   logger.info("Checking login status");
-  await page.goto(DASHBOARD_URL, { waitUntil: "domcontentloaded" });
+  await page.goto(DASHBOARD_URL, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
   const ok = !page.url().includes("/login/");
   logger.info(ok ? "Session active" : "Not logged in");
   return ok;
+}
+
+/** Thrown when a UT page bounces to login mid-task (server-side session expired). */
+export class SessionExpiredError extends Error {
+  constructor(message = "UT session expired") {
+    super(message);
+    this.name = "SessionExpiredError";
+  }
+}
+
+/**
+ * Call when an expected page element is missing. Throws SessionExpiredError if
+ * UT logged us out, otherwise throws `fallback` unchanged.
+ */
+export async function throwIfLoggedOut(page: Page, fallback: Error): Promise<never> {
+  if (page.url().includes("/login/") || !(await isLoggedIn(page).catch(() => true))) {
+    throw new SessionExpiredError();
+  }
+  throw fallback;
 }

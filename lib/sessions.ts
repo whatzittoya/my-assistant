@@ -22,9 +22,13 @@ function toSession(id: string, data: FirebaseFirestore.DocumentData): Session {
   };
 }
 
+const nameCollator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
+
 export async function listSessions(credentialId: string, courseId: string): Promise<Session[]> {
-  const snap = await col(credentialId, courseId).orderBy("name").get();
-  return snap.docs.map((d) => toSession(d.id, d.data()));
+  const snap = await col(credentialId, courseId).get();
+  return snap.docs
+    .map((d) => toSession(d.id, d.data()))
+    .sort((a, b) => nameCollator.compare(a.name, b.name));
 }
 
 export async function saveSessions(

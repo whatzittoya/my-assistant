@@ -7,7 +7,13 @@ function sectionFromUrl(url: string): string {
   return m ? m[1] : url;
 }
 
-function cleanTabName(title: string): string {
+// UT names these activities "Forum Diskusi.1" / "Tugas.1", but the prefix and the
+// separator vary by course ("Diskusi 1", "Forum Diskusi-1"). The leading anchor keeps
+// "Rubrik Diskusi 1" and "Pedoman Penskoran Tugas 1" out.
+const DISKUSI_RE = /^(forum\s+)?diskusi[\s.\-:]*\d+/i;
+const TUGAS_RE = /^(forum\s+)?tugas[\s.\-:]*\d+/i;
+
+export function cleanTabName(title: string): string {
   // Strip " Hidden from students" suffix
   return title.replace(/:\s*hidden from students/i, "").trim();
 }
@@ -30,19 +36,19 @@ async function findActivitiesOnPage(
   });
 
   return {
-    diskusi: all.filter((x) => /^diskusi\s+\d+/i.test(x.name)),
-    tugas: all.filter((x) => /^tugas[\s.]\d+/i.test(x.name)),
+    diskusi: all.filter((x) => DISKUSI_RE.test(x.name)),
+    tugas: all.filter((x) => TUGAS_RE.test(x.name)),
   };
 }
 
-interface TabInfo {
+export interface TabInfo {
   name: string;
   url: string;
   hasChilds: boolean;
   section: string;
 }
 
-async function scrapeLevel0Tabs(page: Page): Promise<TabInfo[]> {
+export async function scrapeLevel0Tabs(page: Page): Promise<TabInfo[]> {
   return page.$$eval(
     ".format_onetopic-tabs li.tab_level_0",
     (items) =>

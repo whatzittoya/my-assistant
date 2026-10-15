@@ -1,6 +1,15 @@
 # Downloaded tugas files
 .tugas-files/
 
+# Downloaded rubrik files
+.rubrik-files/
+
+# Deep-collected course material
+.materi/
+
+# Playwright storage state (contains session cookies)
+.playwright-sessions/
+
 # Secrets
 serviceAccountKey.json
 svc.json
@@ -48,3 +57,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Downloaded rubrik diskusi files
+.rubrik-files/

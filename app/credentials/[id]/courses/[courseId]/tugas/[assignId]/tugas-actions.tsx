@@ -1,6 +1,8 @@
 "use client";
 
+import { RUBRIC_RESPONSE_INSTRUCTION } from "@/lib/tugas-instructions";
 import React, { useEffect, useState } from "react";
+import { cleanPostHtml } from "@/lib/post-html";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -66,18 +68,35 @@ type UploadedResult = {
   score?: number;
 };
 
+const RUBRIC_JSON_PROMPT = [
+  "Baca file rubrik/tugas tutorial yang saya lampirkan, lalu kembalikan HANYA JSON valid (tanpa penjelasan, tanpa code fence) dengan format:",
+  JSON.stringify(
+    {
+      description: "Teks soal/deskripsi tugas lengkap (termasuk kasus dan sub-soal a, b, c, dst.)",
+      pedomanItems: [{ criteria: "Nama poin rubrik, mis. Manfaat proyek investasi industrialisasi (soal 1a)", maxScore: 15 }],
+    },
+    null,
+    2,
+  ),
+  "Aturan:",
+  "- Satu item pedomanItems per poin yang dinilai (per sub-soal a, b, c jika ada skornya sendiri).",
+  "- maxScore berupa angka sesuai kolom Skor Maksimal pada file.",
+  "- Jangan mengubah isi soal; salin apa adanya ke description.",
+].join("\n");
+
 // ── Export / Upload dialog ─────────────────────────────────────────────────────
 
 function TugasExportDialog({
-  open, onClose, instruction, studentsJson, onLoadResults,
+  open, onClose, instruction, studentsJson, responsesJson, onLoadResults,
 }: {
   open: boolean;
   onClose: () => void;
   instruction: string;
   studentsJson: string;
+  responsesJson: string;
   onLoadResults: (results: UploadedResult[]) => void;
 }) {
-  const [tab, setTab] = useState<"instruction" | "students" | "upload">("instruction");
+  const [tab, setTab] = useState<"instruction" | "students" | "responses" | "upload">("instruction");
   const [uploadText, setUploadText] = useState("");
   const [parseError, setParseError] = useState("");
   const [parsed, setParsed] = useState<UploadedResult[]>([]);
@@ -117,6 +136,7 @@ function TugasExportDialog({
   const tabs = [
     { id: "instruction" as const, label: "Instruction" },
     { id: "students" as const, label: "Assignment JSON" },
+    { id: "responses" as const, label: "Export Response" },
     { id: "upload" as const, label: "Upload Result" },
   ];
 
@@ -145,6 +165,13 @@ function TugasExportDialog({
               <p className="text-xs text-muted-foreground">Paste this to the AI after the instruction.</p>
               <Button size="sm" variant="outline" onClick={() => copy(studentsJson)}>Copy JSON</Button>
               <textarea readOnly value={studentsJson} className="w-full h-64 rounded-md border bg-muted/30 p-2 text-xs font-mono resize-none focus:outline-none" />
+            </>
+          )}
+          {tab === "responses" && (
+            <>
+              <p className="text-xs text-muted-foreground">My responses for the selected students, to copy to another agent.</p>
+              <Button size="sm" variant="outline" onClick={() => copy(responsesJson)}>Copy JSON</Button>
+              <textarea readOnly value={responsesJson} className="w-full h-64 rounded-md border bg-muted/30 p-2 text-xs font-mono resize-none focus:outline-none" />
             </>
           )}
           {tab === "upload" && (
@@ -183,7 +210,7 @@ function TugasExportDialog({
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function renderHtml(html: string) {
-  return <span dangerouslySetInnerHTML={{ __html: html }} />;
+  return <span dangerouslySetInnerHTML={{ __html: cleanPostHtml(html) }} />;
 }
 
 function scoreColorPct(score: number, max: number) {
@@ -542,7 +569,7 @@ export function TugasActions({
       .then((data) => {
         const list: Skill[] = data.items ?? [];
         setSkills(list);
-        if (list.length > 0) setSkillId(list[0].id);
+        if (list.length > 0) setSkillId(list.find((s) => s.id === "default")?.id ?? list[0].id);
       })
       .catch(() => {});
   }, []);
@@ -593,6 +620,21 @@ export function TugasActions({
     await collect();
   }
 
+  const assignFolder = (() => {
+    const lp = submissions.flatMap((s) => s.files ?? []).find((f) => f.localPath)?.localPath;
+    return lp ? lp.split("/").slice(0, 2).join("/") : null;
+  })();
+
+  async function openFolder() {
+    if (!assignFolder) return;
+    const res = await fetch("/api/tugas/open-folder", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: assignFolder }),
+    });
+    if (!res.ok) toast.error((await res.json()).error ?? "Failed to open folder");
+  }
+
   // ── Collect ────────────────────────────────────────────────────────────────
 
   async function collect() {
@@ -634,6 +676,46 @@ export function TugasActions({
       });
       if (!res.ok) throw new Error("Failed");
       toast.success("Saved");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setSavingMeta(false);
+    }
+  }
+
+  const [rubricJson, setRubricJson] = useState("");
+
+  async function applyRubricJson() {
+    let data: { description?: unknown; pedomanItems?: unknown };
+    try {
+      data = JSON.parse(rubricJson.trim().replace(/^```(?:json)?\s*|\s*```$/g, ""));
+    } catch {
+      toast.error("Invalid JSON");
+      return;
+    }
+    const rawItems = Array.isArray(data.pedomanItems) ? data.pedomanItems : [];
+    const items: PedomanItem[] = rawItems
+      .filter((r): r is { criteria: string; maxScore?: unknown } =>
+        !!r && typeof r === "object" && typeof (r as { criteria?: unknown }).criteria === "string")
+      .map((r) => ({ id: genId(), criteria: r.criteria, maxScore: Number(r.maxScore) || 0 }));
+    const desc = typeof data.description === "string" ? data.description : description;
+    if (items.length === 0 && typeof data.description !== "string") {
+      toast.error("JSON needs description and/or pedomanItems");
+      return;
+    }
+    const nextItems = items.length > 0 ? items : pedomanItems;
+    setDescription(desc);
+    setPedomanItems(nextItems);
+    setSavingMeta(true);
+    try {
+      const res = await fetch(`/api/tugas/${assignId}/meta`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ credentialId, courseId, description: desc, pedomanItems: nextItems }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      setRubricJson("");
+      toast.success(`Applied: ${nextItems.length} criteria`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed");
     } finally {
@@ -761,6 +843,7 @@ export function TugasActions({
     skills.find((s) => s.id === skillId)?.systemPrompt ?? "",
     description ? `\nDeskripsi Tugas:\n${description}` : "",
     pedomanBlock || "",
+    RUBRIC_RESPONSE_INSTRUCTION,
     `\nFormat kembalikan JSON:\n${JSON.stringify(
       {
         results: [
@@ -783,6 +866,13 @@ export function TugasActions({
     )}`,
   ].filter(Boolean).join("\n\n");
 
+  // My own response for a submission, like diskusi's `myReplies`: the saved
+  // final feedback, else the comment already posted on UT.
+  function myResponseOf(s: TugasSubmission): string {
+    const posted = s.feedbackComment.replace(/^Feedback comments/i, "").trim();
+    return (s.finalEval?.feedback?.trim() || posted).trim();
+  }
+
   const exportStudentsJson = JSON.stringify(
     {
       students: submissions
@@ -794,6 +884,26 @@ export function TugasActions({
             f.localPath ? f.localPath.split("/").pop()! : f.filename
           ),
         })),
+    },
+    null,
+    2,
+  );
+
+  const exportResponsesJson = JSON.stringify(
+    {
+      assignment: {
+        description: description.trim() || undefined,
+        exportedAt: new Date().toISOString(),
+      },
+      myResponses: submissions
+        .filter((s) => selected.has(s.userId))
+        .map((s) => ({
+          userId: s.userId,
+          name: s.name,
+          response: myResponseOf(s),
+          ...(s.finalEval ? { score: s.finalEval.totalScore } : {}),
+        }))
+        .filter((r) => r.response),
     },
     null,
     2,
@@ -866,10 +976,18 @@ export function TugasActions({
     try { localStorage.removeItem(lsKey); } catch { /* ignore */ }
   }
 
+  // Postable = not graded yet, has a score; limited to the selection when one exists
+  function postableSubmissions() {
+    return submissions.filter(
+      (s) =>
+        (selected.size === 0 || selected.has(s.userId)) &&
+        !isGradedSubmission(s) &&
+        (s.finalEval ?? s.aiEval),
+    );
+  }
+
   async function postGrades() {
-    // Collect not-graded submissions that have a finalEval or aiEval score
-    const toPost = submissions
-      .filter((s) => !isGradedSubmission(s))
+    const toPost = postableSubmissions()
       .flatMap((s) => {
         const eval_ = s.finalEval ?? s.aiEval;
         if (!eval_) return [];
@@ -959,6 +1077,11 @@ export function TugasActions({
                 </Button>
               </>
             )}
+            {assignFolder && (
+              <Button variant="outline" size="sm" onClick={openFolder}>
+                Open folder
+              </Button>
+            )}
             <a href={tugasUrl} target="_blank" rel="noreferrer" className="text-xs text-muted-foreground hover:underline">
               Open on UT ↗
             </a>
@@ -970,16 +1093,6 @@ export function TugasActions({
                     {ungraded} not graded
                   </Badge>
                 )}
-                {(() => {
-                  const postable = submissions.filter(
-                    (s) => !isGradedSubmission(s) && (s.finalEval ?? s.aiEval),
-                  ).length;
-                  return postable > 0 ? (
-                    <Button size="sm" onClick={postGrades} disabled={posting}>
-                      {posting ? "Posting..." : `Post to UT (${postable})`}
-                    </Button>
-                  ) : null;
-                })()}
               </>
             )}
           </div>
@@ -1044,6 +1157,33 @@ export function TugasActions({
             ))}
           </select>
         </div>
+      </Section>
+
+      {/* ── Set rubric via JSON ── */}
+      <Section title="Set Description & Rubric via JSON">
+        <p className="text-xs text-muted-foreground">
+          Copy the prompt, send it to an AI together with the rubric file, then paste the JSON it returns below.
+        </p>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            navigator.clipboard.writeText(RUBRIC_JSON_PROMPT);
+            toast.success("Prompt copied");
+          }}
+        >
+          Copy prompt for AI
+        </Button>
+        <Textarea
+          value={rubricJson}
+          onChange={(e) => setRubricJson(e.target.value)}
+          rows={6}
+          placeholder='{"description": "...", "pedomanItems": [{"criteria": "...", "maxScore": 15}]}'
+          className="text-xs font-mono"
+        />
+        <Button size="sm" onClick={applyRubricJson} disabled={savingMeta || !rubricJson.trim()}>
+          Apply & save
+        </Button>
       </Section>
 
       {/* ── Tugas Description ── */}
@@ -1125,19 +1265,18 @@ export function TugasActions({
             <span className="text-xs text-muted-foreground">
               {selected.size} of {submissions.length} selected
             </span>
+            {(() => {
+              const postable = postableSubmissions().length;
+              return postable > 0 ? (
+                <Button size="sm" onClick={postGrades} disabled={posting}>
+                  {posting ? "Posting..." : `Post to UT (${postable})`}
+                </Button>
+              ) : null;
+            })()}
             {selected.size > 0 && (
-              <>
-                <Button
-                  size="sm"
-                  onClick={() => evaluate(Array.from(selected))}
-                  disabled={evaluating || !skillId || selectedWithFiles.length === 0}
-                >
-                  {evaluating ? "Evaluating..." : `Evaluate (${selectedWithFiles.length})`}
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => setShowExport(true)}>
-                  Export / Import
-                </Button>
-              </>
+              <Button size="sm" variant="outline" onClick={() => setShowExport(true)}>
+                Export / Import
+              </Button>
             )}
             {selected.size > 0 && selectedWithFiles.length === 0 && (
               <span className="text-xs text-muted-foreground">No downloaded files in selection.</span>
@@ -1285,6 +1424,7 @@ export function TugasActions({
           onClose={() => setShowExport(false)}
           instruction={exportInstruction}
           studentsJson={exportStudentsJson}
+          responsesJson={exportResponsesJson}
           onLoadResults={loadUploadedResults}
         />
       )}

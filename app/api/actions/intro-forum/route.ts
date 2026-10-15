@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getSession } from "@/lib/playwright/session";
+import { ensureLoggedIn } from "@/lib/playwright/session";
+import { acquireCredentialLock } from "@/lib/playwright/lock";
 import { findForumPerkenalan } from "@/lib/playwright/ut-forum";
 import { getCourse, updateCourseForumUrl } from "@/lib/courses";
 
@@ -22,8 +23,9 @@ export async function POST(req: Request) {
   const course = await getCourse(credentialId, courseId);
   if (!course) return NextResponse.json({ error: "course not found" }, { status: 404 });
 
+  const release = await acquireCredentialLock(credentialId);
   try {
-    const session = await getSession(credentialId);
+    const session = await ensureLoggedIn(credentialId);
     const forumUrl = await findForumPerkenalan(session.page, course.url);
     if (!forumUrl) {
       return NextResponse.json({ error: "Forum Perkenalan not found on course page" }, { status: 404 });
@@ -35,5 +37,7 @@ export async function POST(req: Request) {
       { error: err instanceof Error ? err.message : String(err) },
       { status: 500 },
     );
+  } finally {
+    release();
   }
 }

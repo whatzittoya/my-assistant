@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getSession } from "@/lib/playwright/session";
+import { ensureLoggedIn } from "@/lib/playwright/session";
+import { acquireCredentialLock } from "@/lib/playwright/lock";
 import { scrapeTugasSubmissions, buildAssignFolderName } from "@/lib/playwright/ut-tugas";
 import { saveTugasSubmissions } from "@/lib/tugas";
 import { getCourse } from "@/lib/courses";
@@ -25,8 +26,9 @@ export async function POST(req: Request) {
   }
   const { credentialId, courseId, assignId, downloadFiles, collectScope } = parsed.data;
 
+  const release = await acquireCredentialLock(credentialId);
   try {
-    const session = await getSession(credentialId);
+    const session = await ensureLoggedIn(credentialId);
     logger.info(
       `Collecting tugas ${assignId} (${collectScope})${downloadFiles ? "" : " (skip file download)"}`,
     );
@@ -60,5 +62,7 @@ export async function POST(req: Request) {
       { error: err instanceof Error ? err.message : String(err) },
       { status: 500 },
     );
+  } finally {
+    release();
   }
 }

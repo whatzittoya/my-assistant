@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { randomUUID } from "node:crypto";
 
 export type LogLevel = "info" | "success" | "error" | "warn";
 
@@ -15,11 +16,10 @@ emitter.setMaxListeners(50);
 
 const BUFFER_SIZE = 200;
 const buffer: LogEntry[] = [];
-let counter = 0;
 
 export function log(level: LogLevel, msg: string): void {
   const entry: LogEntry = {
-    id: String(++counter),
+    id: randomUUID(),
     ts: new Date().toISOString(),
     level,
     msg,

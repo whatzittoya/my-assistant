@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listSessionDiscussions } from "@/lib/session-diskusi";
+import { listSessionDiscussionsWithStatus } from "@/lib/session-diskusi";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
@@ -14,6 +14,6 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const items = await listSessionDiscussions(credentialId, courseId, forumId);
+  const items = await listSessionDiscussionsWithStatus(credentialId, courseId, forumId);
   return NextResponse.json({ items });
 }

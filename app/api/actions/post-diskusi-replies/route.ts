@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getSession } from "@/lib/playwright/session";
+import { ensureLoggedIn, withRelogin } from "@/lib/playwright/session";
+import { acquireCredentialLock } from "@/lib/playwright/lock";
 import { postDiskusiReply } from "@/lib/playwright/ut-diskusi-reply";
 import { updateSessionDiscussionReplied } from "@/lib/session-diskusi";
 import { logger } from "@/lib/activity-log";
@@ -21,8 +22,8 @@ const Body = z.object({
   discId: z.string().min(1),
   discussionUrl: z.string().url(),
   items: z.array(ItemSchema).min(1),
-  delayMin: z.number().min(1).max(60).default(5),
-  delayMax: z.number().min(1).max(60).default(6),
+  delayMin: z.number().min(1).max(600).default(5),
+  delayMax: z.number().min(1).max(600).default(6),
 });
 
 function sleep(ms: number) {
@@ -43,8 +44,9 @@ export async function POST(req: Request) {
 
   const results: Array<{ postId: string; status: "ok" | "error"; error?: string }> = [];
 
+  const release = await acquireCredentialLock(credentialId);
   try {
-    const session = await getSession(credentialId);
+    const session = await ensureLoggedIn(credentialId);
 
     // Navigate to discussion page first and wait 2s for full load before posting
     logger.info("Pre-loading discussion page");
@@ -56,12 +58,8 @@ export async function POST(req: Request) {
       logger.info(`Posting reply ${i + 1}/${items.length} for post ${item.postId}`);
 
       try {
-        await postDiskusiReply(
-          session.page,
-          discussionUrl,
-          item.postId,
-          item.reply,
-          item.score,
+        await withRelogin(credentialId, (page) =>
+          postDiskusiReply(page, discussionUrl, item.postId, item.reply, item.score),
         );
         results.push({ postId: item.postId, status: "ok" });
       } catch (err) {
@@ -91,5 +89,7 @@ export async function POST(req: Request) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.err(msg);
     return NextResponse.json({ error: msg }, { status: 500 });
+  } finally {
+    release();
   }
 }

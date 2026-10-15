@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCredentialWithSecret } from "@/lib/credentials";
-import { getSession, saveSession } from "@/lib/playwright/session";
-import { login, isLoggedIn } from "@/lib/playwright/ut-login";
+import { ensureLoggedIn } from "@/lib/playwright/session";
 import { collectCourses } from "@/lib/playwright/ut-courses";
 import { listCourses, saveCourses } from "@/lib/courses";
+import { acquireCredentialLock } from "@/lib/playwright/lock";
 import {
   currentSemester,
   listSemesters,
@@ -30,13 +30,9 @@ export async function POST(req: Request) {
   const cred = await getCredentialWithSecret(parsed.data.credentialId);
   if (!cred) return NextResponse.json({ error: "credential not found" }, { status: 404 });
 
+  const release = await acquireCredentialLock(cred.id);
   try {
-    const session = await getSession(cred.id);
-
-    if (!(await isLoggedIn(session.page))) {
-      await login(session.page, cred.username, cred.password);
-      await saveSession(cred.id);
-    }
+    const session = await ensureLoggedIn(cred.id);
 
     const [previousCourses, previousSemesters] = parsed.data.createSemester
       ? await Promise.all([listCourses(cred.id), listSemesters(cred.id)])
@@ -84,5 +80,7 @@ export async function POST(req: Request) {
       { error: err instanceof Error ? err.message : String(err) },
       { status: 500 },
     );
+  } finally {
+    release();
   }
 }

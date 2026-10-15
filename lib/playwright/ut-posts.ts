@@ -158,12 +158,14 @@ export function hasMyReply(posts: Post[]): boolean {
   return posts.some((p) => p.isMyPost && p.parentPostId !== null);
 }
 
-// For nested session diskusi (single thread, many student roots):
-// "replied" means every depth-1 non-me post has a direct child authored by me.
+// "Replied" = every non-tutor post (at any depth) has a direct child authored by me.
+// Works for both forum models: each-student-own-discussion (student at depth 0)
+// and session-diskusi (lecturer-question at depth 0, students at depth 1+).
+// The lecturer-question is excluded by !isMyPost.
 export function allStudentsAnswered(posts: Post[]): boolean {
-  const studentRoots = posts.filter((p) => p.depth === 1 && !p.isMyPost);
-  if (studentRoots.length === 0) return false;
-  return studentRoots.every((s) =>
+  const studentPosts = posts.filter((p) => !p.isMyPost);
+  if (studentPosts.length === 0) return false;
+  return studentPosts.every((s) =>
     posts.some((c) => c.parentPostId === s.postId && c.isMyPost),
   );
 }

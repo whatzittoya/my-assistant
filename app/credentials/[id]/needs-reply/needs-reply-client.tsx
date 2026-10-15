@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { cleanPostHtml } from "@/lib/post-html";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -65,7 +66,7 @@ function PostCard({ post, isRoot }: { post: Post; isRoot: boolean }) {
       </div>
       <div
         className="prose prose-sm dark:prose-invert max-w-none"
-        dangerouslySetInnerHTML={{ __html: post.contentHtml }}
+        dangerouslySetInnerHTML={{ __html: cleanPostHtml(post.contentHtml) }}
       />
     </div>
   );
@@ -257,7 +258,7 @@ export function NeedsReplyClient({
               <Input
                 type="number"
                 min={1}
-                max={60}
+                max={600}
                 value={delayMin}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                   setDelayMin(Number(e.target.value))
@@ -268,7 +269,7 @@ export function NeedsReplyClient({
               <Input
                 type="number"
                 min={1}
-                max={60}
+                max={600}
                 value={delayMax}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                   setDelayMax(Number(e.target.value))

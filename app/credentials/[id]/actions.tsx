@@ -40,6 +40,7 @@ export function CredentialActions({
     initialSemesters[0]?.id ?? "all",
   );
   const [loginBusy, setLoginBusy] = useState(false);
+  const [resetBusy, setResetBusy] = useState(false);
   const [loginStatus, setLoginStatus] = useState<Status>("idle");
   const [coursesBusy, setCoursesBusy] = useState(false);
   const [semesterBusy, setSemesterBusy] = useState(false);
@@ -58,6 +59,25 @@ export function CredentialActions({
       for (const course of nextCourses) merged.set(course.courseId, course);
       return Array.from(merged.values()).sort((a, b) => a.name.localeCompare(b.name));
     });
+  }
+
+  async function resetSession() {
+    setResetBusy(true);
+    try {
+      const res = await fetch("/api/actions/reset-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ credentialId }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Failed");
+      setLoginStatus("idle");
+      toast.success("Browser closed — next action relaunches and logs in");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setResetBusy(false);
+    }
   }
 
   async function runLogin() {
@@ -148,9 +168,17 @@ export function CredentialActions({
               Opens browser and signs in. Same window reused on repeat.
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <Button onClick={runLogin} disabled={loginBusy}>
+          <CardContent className="flex flex-wrap gap-2">
+            <Button onClick={runLogin} disabled={loginBusy || resetBusy}>
               {loginBusy ? "Logging in..." : "Run login"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={resetSession}
+              disabled={loginBusy || resetBusy}
+              title="Close the shared browser — use when a long scrape leaves it stuck"
+            >
+              {resetBusy ? "Resetting..." : "Reset browser"}
             </Button>
           </CardContent>
         </Card>

@@ -145,6 +145,39 @@ export async function listPosts(
   return snap.docs.map((d) => toPost(d.id, d.data()));
 }
 
+// ── Threads with posts ───────────────────────────────────────────────────────
+
+export type DiscussionWithPosts = {
+  discussion: Discussion;
+  posts: Post[];
+};
+
+/**
+ * All discussions of one course, each with its posts attached.
+ * Sorted by lastPostDate asc (oldest first) so the batch reads chronologically.
+ */
+export async function listDiscussionsWithPosts(
+  credentialId: string,
+  courseId: string,
+): Promise<DiscussionWithPosts[]> {
+  const snap = await col(credentialId, courseId).get();
+
+  const groups = await Promise.all(
+    snap.docs.map(async (d) => {
+      const discussion = toDiscussion(d.id, d.data());
+      const postsSnap = await postsCol(credentialId, courseId, d.id).get();
+      const posts = postsSnap.docs.map((p) => toPost(p.id, p.data()));
+      return { discussion, posts };
+    }),
+  );
+
+  groups.sort((a, b) =>
+    (a.discussion.lastPostDate ?? "").localeCompare(b.discussion.lastPostDate ?? ""),
+  );
+
+  return groups;
+}
+
 // ── Needs Reply ──────────────────────────────────────────────────────────────
 
 export type NeedsReplyGroup = {

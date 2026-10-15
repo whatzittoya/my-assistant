@@ -2,6 +2,7 @@ export type Credential = {
   id: string;
   label: string;
   username: string;
+  diskusiSkillId?: string; // preferred skill for forum diskusi replies
   createdAt: string;
   updatedAt: string;
 };
@@ -15,6 +16,8 @@ export type Course = {
   name: string;
   url: string;
   forumPerkenalan?: string; // URL to Forum Perkenalan mod
+  materiPath?: string; // folder under .materi/, relative to project root
+  materiCollectedAt?: string;
   collectedAt: string;
 };
 
@@ -38,6 +41,11 @@ export type Discussion = {
   collectedAt: string;
 };
 
+export type DiscussionWithStatus = Discussion & {
+  totalStudents: number;      // non-tutor posts in the thread
+  unrepliedStudents: number;  // students still needing a reply
+};
+
 export type SessionActivity = {
   name: string;
   url: string;
@@ -49,6 +57,14 @@ export type Session = {
   url: string;
   diskusi: SessionActivity[];
   tugas: SessionActivity[];
+  collectedAt: string;
+};
+
+export type RubrikFile = {
+  name: string;       // activity name on UT, e.g. "Rubrik Diskusi 1"
+  url: string;        // UT resource URL
+  filename: string;   // file name on disk (PDF after conversion)
+  localPath: string;  // relative to .rubrik-files/
   collectedAt: string;
 };
 
@@ -64,9 +80,22 @@ export type TugasMeta = {
   updatedAt: string | null;
 };
 
+/** A hand-edited reply waiting to be posted to UT. */
+export type DiskusiDraft = {
+  postId: string;
+  reply: string;
+  score: number | null;
+};
+
 export type DiskusiMeta = {
   question: string;
   pedomanItems: PedomanItem[];
+  // Drafts saved before posting, so edits survive a reload.
+  drafts: DiskusiDraft[];
+  draftsUpdatedAt: string | null;
+  // postIds the lecturer manually forced back to "not replied", overriding
+  // the auto-detection (which counts any child post as a reply).
+  manualUnreplied: string[];
   updatedAt: string | null;
 };
 
@@ -187,4 +216,34 @@ export type ScoreMonitorSummary = {
   missingScores: number;
   missingDiskusi: number;
   missingTugas: number;
+};
+
+// ── Deep-collected course material (.materi/) ────────────────────────────────
+
+export type MaterialActivity =
+  | { kind: "text"; html: string }
+  | { kind: "file"; name: string; url: string; filename: string; localPath: string }
+  | { kind: "link"; name: string; url: string; target: string }
+  | { kind: "assign"; name: string; url: string; html: string; dueDate?: string }
+  | { kind: "forum"; name: string; url: string; html: string }
+  | { kind: "webinar"; name: string; url: string; subject?: string; start?: string; end?: string; timezone?: string; joinUrl?: string }
+  | { kind: "other"; mod: string; name: string; url: string };
+
+export type CollectedSession = {
+  section: string;
+  name: string;
+  url: string;
+  summaryHtml: string;
+  activities: MaterialActivity[];
+  dirName: string;
+  error?: string;
+};
+
+export type CollectedCourse = {
+  courseId: string;
+  courseName: string;
+  semesterName: string;
+  courseUrl: string;
+  collectedAt: string;
+  sessions: CollectedSession[];
 };

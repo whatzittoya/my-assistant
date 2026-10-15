@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { gemini, MODEL } from "@/lib/gemini";
+import { gemini, MODEL, geminiDisabledResponse } from "@/lib/gemini";
 import { getSkill } from "@/lib/skills";
-import { listSessionPosts, getSessionDiscussion } from "@/lib/session-diskusi";
+import { listSessionPosts, getSessionDiscussion, getDiskusiMeta } from "@/lib/session-diskusi";
 import { Type } from "@google/genai";
 
 export const runtime = "nodejs";
@@ -23,16 +23,19 @@ function stripHtml(html: string): string {
 }
 
 export async function POST(req: Request) {
+  const disabled = geminiDisabledResponse();
+  if (disabled) return disabled;
   const parsed = Body.safeParse(await req.json());
   if (!parsed.success)
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
   const { credentialId, courseId, forumId, discId, skillId, maxStudents, postIds } = parsed.data;
 
-  const [skill, discussion, allPosts] = await Promise.all([
+  const [skill, discussion, allPosts, meta] = await Promise.all([
     getSkill(skillId),
     getSessionDiscussion(credentialId, courseId, forumId, discId),
     listSessionPosts(credentialId, courseId, forumId, discId),
+    getDiskusiMeta(credentialId, courseId, forumId, discId),
   ]);
 
   if (!skill)
@@ -40,10 +43,11 @@ export async function POST(req: Request) {
   if (!discussion)
     return NextResponse.json({ error: "Discussion not found" }, { status: 404 });
 
-  // Student posts = any depth > 0, not tutor's own, not already replied to by tutor
+  // Student posts = any non-tutor post (any depth) without a direct lecturer child reply.
+  // Includes depth-0 thread-starters (each-student-own-discussion model) and
+  // nested off-thread replies (students who replied inside another student's thread).
   const allStudentPosts = allPosts.filter(
     (p) =>
-      p.depth > 0 &&
       !p.isMyPost &&
       !allPosts.some((r) => r.isMyPost && r.parentPostId === p.postId),
   );
@@ -63,11 +67,24 @@ export async function POST(req: Request) {
     studentPosts = maxStudents ? sorted.slice(0, maxStudents) : sorted;
   }
 
-  // Root post (prompt question) for context
+  // Root post is the discussion question only when authored by the lecturer
+  // (session-diskusi style). In each-student-own-discussion forums the depth-0
+  // post is a student's own answer — not a question — so skip it.
   const rootPost = allPosts.find((p) => p.depth === 0);
-  const rootContext = rootPost
-    ? `Pertanyaan diskusi:\n${stripHtml(rootPost.contentHtml)}\n\n`
-    : "";
+  const questionText = meta.question.trim()
+    ? meta.question.trim()
+    : rootPost && rootPost.isMyPost
+      ? stripHtml(rootPost.contentHtml)
+      : "";
+  const rootContext = questionText ? `Pertanyaan diskusi:\n${questionText}\n\n` : "";
+
+  const activePedoman = meta.pedomanItems.filter((p) => p.criteria.trim());
+  const pedomanContext =
+    activePedoman.length > 0
+      ? `Pedoman Penilaian (Total maks. ${activePedoman.reduce((s, p) => s + p.maxScore, 0)} poin):\n` +
+        activePedoman.map((p, i) => `${i + 1}. ${p.criteria} (maks. ${p.maxScore} poin)`).join("\n") +
+        "\n\n"
+      : "";
 
   const sections = studentPosts.map((p, i) => {
     return (
@@ -81,6 +98,7 @@ export async function POST(req: Request) {
   const userPrompt =
     `Diskusi: ${discussion.title}\n\n` +
     rootContext +
+    pedomanContext +
     `Berikut adalah ${studentPosts.length} kiriman mahasiswa yang perlu dinilai dan dibalas.\n` +
     `Untuk setiap kiriman:\n` +
     `1. Beri skor kualitas jawaban 1–100\n` +

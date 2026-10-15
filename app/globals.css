@@ -128,3 +128,17 @@
     @apply font-sans;
   }
 }
+/* Scraped UT post HTML sometimes carries Moodle's video.js markup. We don't
+   load video.js CSS, so `.video-js` has no `position`, and its absolutely
+   positioned `.vjs-iframe-blocker` (width/height 100%) resolves against the
+   page instead — a full-viewport invisible overlay that swallows every click.
+   Kill the blocker and contain anything else the player positions. */
+.vjs-iframe-blocker,
+.vjs-tech,
+.vjs-resize-manager {
+  display: none !important;
+}
+.video-js,
+.mediaplugin {
+  position: relative;
+}

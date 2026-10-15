@@ -2,8 +2,10 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getCredential } from "@/lib/credentials";
 import { getCourse } from "@/lib/courses";
-import { listSessionDiscussions } from "@/lib/session-diskusi";
+import { listSessionDiscussionsWithStatus } from "@/lib/session-diskusi";
 import { listSessions } from "@/lib/sessions";
+import { listRubrikFiles } from "@/lib/rubrik-diskusi";
+import { RubrikCard } from "@/components/rubrik-card";
 import { DiskusiActions } from "./diskusi-actions";
 
 export const dynamic = "force-dynamic";
@@ -15,11 +17,12 @@ export default async function DiskusiForumPage({
 }) {
   const { id, courseId, forumId } = await params;
 
-  const [cred, course, discussions, sessions] = await Promise.all([
+  const [cred, course, discussions, sessions, rubrikFiles] = await Promise.all([
     getCredential(id),
     getCourse(id, courseId),
-    listSessionDiscussions(id, courseId, forumId),
+    listSessionDiscussionsWithStatus(id, courseId, forumId),
     listSessions(id, courseId),
+    listRubrikFiles(id, courseId, forumId),
   ]);
 
   if (!cred || !course) notFound();
@@ -45,6 +48,13 @@ export default async function DiskusiForumPage({
         </p>
         <h1 className="text-2xl font-semibold">{forumName}</h1>
       </div>
+
+      <RubrikCard
+        credentialId={id}
+        courseId={courseId}
+        forumId={forumId}
+        initialFiles={rubrikFiles}
+      />
 
       <DiskusiActions
         credentialId={id}

@@ -14,7 +14,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { toast } from "sonner";
-import type { Discussion } from "@/types";
+import type { DiscussionWithStatus } from "@/types";
 
 export function DiskusiActions({
   credentialId,
@@ -27,9 +27,9 @@ export function DiskusiActions({
   courseId: string;
   forumId: string;
   forumName: string;
-  initialDiscussions: Discussion[];
+  initialDiscussions: DiscussionWithStatus[];
 }) {
-  const [discussions, setDiscussions] = useState<Discussion[]>(initialDiscussions);
+  const [discussions, setDiscussions] = useState<DiscussionWithStatus[]>(initialDiscussions);
   const [busy, setBusy] = useState(false);
 
   async function refresh() {
@@ -61,7 +61,10 @@ export function DiskusiActions({
     }
   }
 
-  const needsReply = discussions.filter((d) => !d.iReplied).length;
+  // A thread "needs reply" if any student in it is still unanswered — not the
+  // coarse iReplied flag, which flips to true after a single reply.
+  const needsReply = discussions.filter((d) => d.unrepliedStudents > 0).length;
+  const studentsRemaining = discussions.reduce((sum, d) => sum + d.unrepliedStudents, 0);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   async function deleteDiscussion(discId: string, title: string) {
@@ -95,7 +98,10 @@ export function DiskusiActions({
           <div className="flex items-center justify-between">
             <CardTitle>Refresh {forumName}</CardTitle>
             {needsReply > 0 && (
-              <Badge variant="destructive">{needsReply} need reply</Badge>
+              <Badge variant="destructive">
+                {needsReply} thread{needsReply > 1 ? "s" : ""} · {studentsRemaining} student
+                {studentsRemaining > 1 ? "s" : ""} need reply
+              </Badge>
             )}
             {discussions.length > 0 && needsReply === 0 && (
               <Badge variant="default">All replied</Badge>
@@ -120,13 +126,13 @@ export function DiskusiActions({
               <TableHead>Last post by</TableHead>
               <TableHead>Date</TableHead>
               <TableHead className="text-center">Replies</TableHead>
-              <TableHead className="text-center">Replied?</TableHead>
+              <TableHead className="text-center">Reply status</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {discussions.map((d) => (
-              <TableRow key={d.id} className={!d.iReplied ? "bg-destructive/5" : ""}>
+              <TableRow key={d.id} className={d.unrepliedStudents > 0 ? "bg-destructive/5" : ""}>
                 <TableCell className="font-medium">
                   <div className="flex items-center gap-1.5">
                     <Link
@@ -152,10 +158,14 @@ export function DiskusiActions({
                 </TableCell>
                 <TableCell className="text-center">{d.repliesCount}</TableCell>
                 <TableCell className="text-center">
-                  {d.iReplied ? (
-                    <Badge variant="default">Yes</Badge>
+                  {d.totalStudents === 0 ? (
+                    <span className="text-xs text-muted-foreground">—</span>
+                  ) : d.unrepliedStudents === 0 ? (
+                    <Badge variant="default">All replied</Badge>
                   ) : (
-                    <Badge variant="destructive">No</Badge>
+                    <Badge variant="destructive">
+                      {d.unrepliedStudents} of {d.totalStudents} need reply
+                    </Badge>
                   )}
                 </TableCell>
                 <TableCell className="text-right">

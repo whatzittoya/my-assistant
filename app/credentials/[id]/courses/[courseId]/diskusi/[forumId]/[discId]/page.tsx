@@ -33,12 +33,6 @@ export default async function SessionDiscussionDetailPage({
       .flatMap((s) => s.diskusi)
       .find((d) => d.url.includes(`id=${forumId}`))?.name ?? `Diskusi ${forumId}`;
 
-  // Student replies at depth 1 that don't have a "Me" reply under them
-  const studentReplies = posts.filter((p) => p.depth === 1 && !p.isMyPost);
-  const unrespondedStudents = studentReplies.filter(
-    (s) => !posts.some((p) => p.isMyPost && p.parentPostId === s.postId),
-  );
-
   return (
     <div className="space-y-6">
       <div>
@@ -89,22 +83,6 @@ export default async function SessionDiscussionDetailPage({
           </a>
         </p>
       </div>
-
-      {/* Unreplied students summary */}
-      {unrespondedStudents.length > 0 && (
-        <div className="rounded-lg border border-destructive/50 bg-destructive/5 p-4">
-          <p className="text-sm font-semibold text-destructive mb-1">
-            {unrespondedStudents.length} student{unrespondedStudents.length > 1 ? "s" : ""} need your reply:
-          </p>
-          <ul className="text-sm space-y-0.5">
-            {unrespondedStudents.map((s) => (
-              <li key={s.postId} className="text-muted-foreground">
-                · {s.author}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
 
       <DiskusiActions
         credentialId={id}

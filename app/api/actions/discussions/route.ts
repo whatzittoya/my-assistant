@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getSession } from "@/lib/playwright/session";
+import { ensureLoggedIn } from "@/lib/playwright/session";
+import { acquireCredentialLock } from "@/lib/playwright/lock";
 import { scrapeDiscussions } from "@/lib/playwright/ut-discussions";
-import { scrapePosts, hasMyReply } from "@/lib/playwright/ut-posts";
+import { scrapePosts, allStudentsAnswered } from "@/lib/playwright/ut-posts";
 import { saveDiscussion, savePosts, updateDiscussionReplied } from "@/lib/discussions";
 import { getCourse } from "@/lib/courses";
 import { getCredential } from "@/lib/credentials";
@@ -31,8 +32,9 @@ export async function POST(req: Request) {
     );
   }
 
+  const release = await acquireCredentialLock(credentialId);
   try {
-    const session = await getSession(credentialId);
+    const session = await ensureLoggedIn(credentialId);
     const cred = await getCredential(credentialId);
     const rawDiscussions = await scrapeDiscussions(session.page, course.forumPerkenalan);
 
@@ -54,7 +56,7 @@ export async function POST(req: Request) {
       const posts = await scrapePosts(session.page, d.url, cred?.username);
       await savePosts(credentialId, courseId, d.id, posts);
 
-      const replied = hasMyReply(posts);
+      const replied = allStudentsAnswered(posts);
       await updateDiscussionReplied(credentialId, courseId, d.id, replied);
 
       logger.ok(`"${d.title}" — ${posts.length} posts, replied: ${replied}`);
@@ -69,5 +71,7 @@ export async function POST(req: Request) {
       { error: err instanceof Error ? err.message : String(err) },
       { status: 500 },
     );
+  } finally {
+    release();
   }
 }

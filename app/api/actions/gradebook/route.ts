@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCourse } from "@/lib/courses";
 import { saveGradebookSnapshot } from "@/lib/gradebook";
-import { getSession } from "@/lib/playwright/session";
+import { ensureLoggedIn } from "@/lib/playwright/session";
+import { acquireCredentialLock } from "@/lib/playwright/lock";
 import { scrapeGradebook } from "@/lib/playwright/ut-gradebook";
 import { logger } from "@/lib/activity-log";
 
@@ -24,8 +25,9 @@ export async function POST(req: Request) {
   const course = await getCourse(credentialId, courseId);
   if (!course) return NextResponse.json({ error: "course not found" }, { status: 404 });
 
+  const release = await acquireCredentialLock(credentialId);
   try {
-    const session = await getSession(credentialId);
+    const session = await ensureLoggedIn(credentialId);
     const snapshot = await scrapeGradebook(session.page, courseId);
     await saveGradebookSnapshot(credentialId, courseId, snapshot);
     logger.ok(`Saved gradebook snapshot for course ${courseId}`);
@@ -41,5 +43,7 @@ export async function POST(req: Request) {
       { error: err instanceof Error ? err.message : String(err) },
       { status: 500 },
     );
+  } finally {
+    release();
   }
 }

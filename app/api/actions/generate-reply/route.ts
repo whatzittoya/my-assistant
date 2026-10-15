@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { gemini, MODEL } from "@/lib/gemini";
+import { gemini, MODEL, geminiDisabledResponse } from "@/lib/gemini";
 import { getSkill } from "@/lib/skills";
 import { getDiscussion, listPosts } from "@/lib/discussions";
 import { Type } from "@google/genai";
@@ -20,6 +20,8 @@ function stripHtml(html: string): string {
 }
 
 export async function POST(req: Request) {
+  const disabled = geminiDisabledResponse();
+  if (disabled) return disabled;
   const parsed = Body.safeParse(await req.json());
   if (!parsed.success)
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });

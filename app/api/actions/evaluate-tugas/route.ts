@@ -1,8 +1,9 @@
+import { RUBRIC_RESPONSE_INSTRUCTION } from "@/lib/tugas-instructions";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
-import { gemini } from "@/lib/gemini";
+import { gemini, geminiDisabledResponse } from "@/lib/gemini";
 import { getSkill } from "@/lib/skills";
 import { getTugasMeta } from "@/lib/tugas-meta";
 import { listTugasSubmissions, saveAiEval } from "@/lib/tugas";
@@ -32,6 +33,8 @@ const Body = z.object({
 });
 
 export async function POST(req: Request) {
+  const disabled = geminiDisabledResponse();
+  if (disabled) return disabled;
   const parsed = Body.safeParse(await req.json());
   if (!parsed.success)
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
@@ -72,6 +75,7 @@ export async function POST(req: Request) {
     skill.systemPrompt,
     meta.description ? `\nDeskripsi Tugas:\n${meta.description}` : "",
     pedomanBlock || "",
+    RUBRIC_RESPONSE_INSTRUCTION,
   ]
     .filter(Boolean)
     .join("\n\n");

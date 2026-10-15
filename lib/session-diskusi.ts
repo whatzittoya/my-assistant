@@ -1,5 +1,6 @@
 import { db } from "@/lib/firebase-admin";
-import type { Discussion, Post, PedomanItem, DiskusiMeta } from "@/types";
+import type { Discussion, DiscussionWithStatus, Post, PedomanItem, DiskusiMeta, DiskusiDraft } from "@/types";
+import { diskusiReplyStatus } from "@/lib/diskusi-reply-status";
 import { Timestamp } from "firebase-admin/firestore";
 
 // Path: credentials/{id}/courses/{courseId}/diskusi/{forumId}/discussions/{discId}
@@ -59,6 +60,27 @@ export async function listSessionDiscussions(
     .orderBy("collectedAt", "desc")
     .get();
   return snap.docs.map((d) => toDiscussion(d.id, d.data()));
+}
+
+// Discussions augmented with per-thread reply status, computed from each
+// thread's stored posts + manual override. Reveals threads that are only
+// partially replied (a binary iReplied flag would hide these).
+export async function listSessionDiscussionsWithStatus(
+  credentialId: string,
+  courseId: string,
+  forumId: string,
+): Promise<DiscussionWithStatus[]> {
+  const discussions = await listSessionDiscussions(credentialId, courseId, forumId);
+  return Promise.all(
+    discussions.map(async (d) => {
+      const [posts, meta] = await Promise.all([
+        listSessionPosts(credentialId, courseId, forumId, d.id),
+        getDiskusiMeta(credentialId, courseId, forumId, d.id),
+      ]);
+      const { totalStudents, unrepliedStudents } = diskusiReplyStatus(posts, meta.manualUnreplied);
+      return { ...d, totalStudents, unrepliedStudents };
+    }),
+  );
 }
 
 export async function getSessionDiscussion(
@@ -182,6 +204,25 @@ function metaRef(credentialId: string, courseId: string, forumId: string, discId
     .doc("data");
 }
 
+function parseManualUnreplied(data: FirebaseFirestore.DocumentData): string[] {
+  if (!Array.isArray(data.manualUnreplied)) return [];
+  return (data.manualUnreplied as unknown[]).filter(
+    (id): id is string => typeof id === "string" && id.length > 0,
+  );
+}
+
+function parseDrafts(data: FirebaseFirestore.DocumentData): DiskusiDraft[] {
+  if (!Array.isArray(data.drafts)) return [];
+  return (data.drafts as unknown[])
+    .filter((d): d is Record<string, unknown> => typeof d === "object" && d !== null)
+    .map((d) => ({
+      postId: String(d.postId ?? ""),
+      reply: typeof d.reply === "string" ? d.reply : "",
+      score: typeof d.score === "number" ? d.score : null,
+    }))
+    .filter((d) => d.postId);
+}
+
 export async function getDiskusiMeta(
   credentialId: string,
   courseId: string,
@@ -189,11 +230,22 @@ export async function getDiskusiMeta(
   discId: string,
 ): Promise<DiskusiMeta> {
   const doc = await metaRef(credentialId, courseId, forumId, discId).get();
-  if (!doc.exists) return { question: "", pedomanItems: [], updatedAt: null };
+  if (!doc.exists)
+    return {
+      question: "",
+      pedomanItems: [],
+      drafts: [],
+      draftsUpdatedAt: null,
+      manualUnreplied: [],
+      updatedAt: null,
+    };
   const data = doc.data()!;
   return {
     question: data.question ?? "",
     pedomanItems: parsePedomanItems(data),
+    drafts: parseDrafts(data),
+    draftsUpdatedAt: (data.draftsUpdatedAt as Timestamp)?.toDate().toISOString() ?? null,
+    manualUnreplied: parseManualUnreplied(data),
     updatedAt: (data.metaUpdatedAt as Timestamp)?.toDate().toISOString() ?? null,
   };
 }
@@ -205,11 +257,49 @@ export async function saveDiskusiMeta(
   discId: string,
   meta: { question: string; pedomanItems: PedomanItem[] },
 ): Promise<void> {
-  await metaRef(credentialId, courseId, forumId, discId).set({
-    question: meta.question,
-    pedomanItems: meta.pedomanItems,
-    metaUpdatedAt: Timestamp.now(),
-  });
+  // merge so the reply-status override (manualUnreplied) is never clobbered.
+  await metaRef(credentialId, courseId, forumId, discId).set(
+    {
+      question: meta.question,
+      pedomanItems: meta.pedomanItems,
+      metaUpdatedAt: Timestamp.now(),
+    },
+    { merge: true },
+  );
+}
+
+/** Persist hand-edited drafts, leaving question/pedoman/manualUnreplied intact. */
+export async function saveDiskusiDrafts(
+  credentialId: string,
+  courseId: string,
+  forumId: string,
+  discId: string,
+  drafts: DiskusiDraft[],
+): Promise<void> {
+  await metaRef(credentialId, courseId, forumId, discId).set(
+    {
+      drafts,
+      draftsUpdatedAt: Timestamp.now(),
+    },
+    { merge: true },
+  );
+}
+
+// Persist only the manual reply-status override, leaving question/pedoman intact.
+export async function saveDiskusiManualUnreplied(
+  credentialId: string,
+  courseId: string,
+  forumId: string,
+  discId: string,
+  postIds: string[],
+): Promise<void> {
+  await metaRef(credentialId, courseId, forumId, discId).set(
+    {
+      manualUnreplied: postIds,
+      metaUpdatedAt: Timestamp.now(),
+    },
+    { merge: true },
+  );
 }
 
 export async function deleteSessionDiscussion(

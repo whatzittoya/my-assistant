@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -188,7 +189,7 @@ function FinalEvalEditor({
             </thead>
             <tbody>
               {criteria.map((c, i) => {
-                const aiCs = aiEval?.criteriaScores.find((a) => a.criteria === c.criteria);
+                const aiCs = aiEval?.criteriaScores.find((a) => (c.id && a.id ? a.id === c.id : a.criteria === c.criteria));
                 return (
                   <tr key={i} className="border-b last:border-0">
                     <td className="px-3 py-1.5">{c.criteria}</td>
@@ -276,6 +277,7 @@ export function SubmissionDetail({
   courseId,
   assignId,
   allSubmissions,
+  previousFeedback,
   onReEvaluate,
 }: {
   submission: TugasSubmission;
@@ -284,6 +286,12 @@ export function SubmissionDetail({
   courseId: string;
   assignId: string;
   allSubmissions?: { userId: string; name: string }[];
+  previousFeedback?: {
+    tugasName: string;
+    assignId: string;
+    feedback: string;
+    savedAt: string;
+  } | null;
   onReEvaluate?: () => void;
 }) {
   const router = useRouter();
@@ -293,6 +301,20 @@ export function SubmissionDetail({
   );
 
   const totalMax = meta.pedomanItems.reduce((s, p) => s + p.maxScore, 0) || 100;
+
+  // Evals imported from JSON only carry criterion ids; fill in names from the pedoman.
+  const pedomanById = new Map(meta.pedomanItems.map((p) => [p.id, p]));
+  const withNames = (list: CriteriaScore[]) =>
+    list.map((c) => {
+      const p = pedomanById.get(c.id);
+      return { ...c, criteria: c.criteria || p?.criteria || "", maxScore: c.maxScore || p?.maxScore || 0 };
+    });
+  const aiEval = submission.aiEval
+    ? { ...submission.aiEval, criteriaScores: withNames(submission.aiEval.criteriaScores) }
+    : undefined;
+  const finalEval = submission.finalEval
+    ? { ...submission.finalEval, criteriaScores: withNames(submission.finalEval.criteriaScores) }
+    : undefined;
 
   function handleFinalSaved(finalEval: SubmissionFinalEval) {
     setSubmission((prev) => ({ ...prev, finalEval }));
@@ -386,11 +408,16 @@ export function SubmissionDetail({
       </div>
 
       {/* ── Right panel ── */}
-      <div className="w-[400px] shrink-0 overflow-y-auto space-y-4 h-full pr-1">
+      <div className="w-[560px] shrink-0 overflow-y-auto space-y-4 h-full pr-1">
         {/* Student info */}
         <div className="space-y-1">
           <p className="text-lg font-semibold">{submission.name}</p>
           <p className="text-sm text-muted-foreground">{submission.email}</p>
+          {(submission.lastModifiedSubmission || submission.files[0]?.submittedAt) && (
+            <p className="text-sm text-muted-foreground">
+              Submitted: {submission.lastModifiedSubmission || submission.files[0]?.submittedAt}
+            </p>
+          )}
           <div className="flex flex-wrap gap-2 pt-1">
             <Badge variant="outline" className="text-xs">{submission.status}</Badge>
             {hasFinalEval && (
@@ -406,8 +433,8 @@ export function SubmissionDetail({
         </div>
 
         {/* AI Eval (read-only) */}
-        {submission.aiEval ? (
-          <AiEvalPanel eval={submission.aiEval} totalMax={totalMax} />
+        {aiEval ? (
+          <AiEvalPanel eval={aiEval} totalMax={totalMax} />
         ) : (
           <div className="rounded-lg border p-4 bg-muted/10 space-y-2">
             <p className="text-sm font-semibold text-muted-foreground">No AI Evaluation yet</p>
@@ -417,11 +444,34 @@ export function SubmissionDetail({
           </div>
         )}
 
+        {/* Previous tugas feedback (read-only reference) */}
+        {previousFeedback && (
+          <div className="rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50/40 dark:bg-blue-950/20 p-4 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">
+                Previous feedback · {previousFeedback.tugasName}
+              </p>
+              <Link
+                href={`/credentials/${credentialId}/courses/${courseId}/tugas/${previousFeedback.assignId}/submissions/${submission.userId}`}
+                className="text-xs text-blue-700 dark:text-blue-300 hover:underline"
+              >
+                Open ↗
+              </Link>
+            </div>
+            <p className="text-sm whitespace-pre-wrap text-foreground/90">
+              {previousFeedback.feedback}
+            </p>
+            <p className="text-[10px] text-muted-foreground">
+              Saved: {new Date(previousFeedback.savedAt).toLocaleString()}
+            </p>
+          </div>
+        )}
+
         {/* Final Eval (editable) */}
         <FinalEvalEditor
           submission={submission}
-          aiEval={submission.aiEval}
-          initialFinalEval={submission.finalEval}
+          aiEval={aiEval}
+          initialFinalEval={finalEval}
           pedomanItems={meta.pedomanItems}
           totalMax={totalMax}
           assignId={assignId}

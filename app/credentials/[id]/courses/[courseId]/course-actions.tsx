@@ -20,6 +20,8 @@ export function CourseActions({
   credentialId,
   courseId,
   hasForumUrl,
+  initialMateriPath,
+  initialMateriAt,
   initialDiscussions,
   initialSessions,
 }: {
@@ -27,6 +29,8 @@ export function CourseActions({
   courseId: string;
   courseUrl: string;
   hasForumUrl: boolean;
+  initialMateriPath?: string;
+  initialMateriAt?: string;
   initialDiscussions: Discussion[];
   initialSessions: Session[];
 }) {
@@ -36,6 +40,10 @@ export function CourseActions({
   const [findBusy, setFindBusy] = useState(false);
   const [refreshBusy, setRefreshBusy] = useState(false);
   const [sessionsBusy, setSessionsBusy] = useState(false);
+  const [allDiskusiBusy, setAllDiskusiBusy] = useState(false);
+  const [materiBusy, setMateriBusy] = useState(false);
+  const [materiPath, setMateriPath] = useState(initialMateriPath);
+  const [materiAt, setMateriAt] = useState(initialMateriAt);
 
   async function findForum() {
     setFindBusy(true);
@@ -108,7 +116,66 @@ export function CourseActions({
     }
   }
 
+  async function collectMaterial() {
+    setMateriBusy(true);
+    try {
+      const res = await fetch("/api/actions/collect-material", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ credentialId, courseId }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Failed");
+
+      setMateriPath(json.outDir);
+      setMateriAt(new Date().toISOString());
+      if (json.failed > 0) {
+        toast.warning(
+          `${json.totalSections - json.failed}/${json.totalSections} sections collected (${json.failed} failed — see activity log), ${json.totalFiles} files`,
+        );
+      } else {
+        toast.success(`${json.totalSections} sections, ${json.totalFiles} files → ${json.outDir}`);
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setMateriBusy(false);
+    }
+  }
+
+  async function refreshAllDiskusi() {
+    setAllDiskusiBusy(true);
+    try {
+      const res = await fetch("/api/actions/course-diskusi", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ credentialId, courseId }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Failed");
+
+      const updated = json.results?.reduce(
+        (sum: number, r: { updated?: number }) => sum + (r.updated ?? 0),
+        0,
+      ) ?? 0;
+      if (json.failed > 0) {
+        toast.warning(
+          `${json.total - json.failed}/${json.total} forums refreshed (${json.failed} failed — see activity log), ${updated} threads updated`,
+        );
+      } else {
+        toast.success(`${json.total} forums refreshed, ${updated} threads updated`);
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setAllDiskusiBusy(false);
+    }
+  }
+
   const needsReply = discussions.filter((d) => !d.iReplied).length;
+  const diskusiForumCount = new Set(
+    sessions.flatMap((s) => s.diskusi).map((d) => d.url.match(/[?&]id=(\d+)/)?.[1]).filter(Boolean),
+  ).size;
 
   return (
     <div className="space-y-6">
@@ -149,13 +216,18 @@ export function CourseActions({
               Scrapes discussion list + posts. Skips unchanged threads.
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="flex flex-wrap gap-2">
             <Button
               onClick={refreshDiscussions}
               disabled={refreshBusy || !forumFound}
             >
               {refreshBusy ? "Refreshing..." : "Refresh"}
             </Button>
+            {discussions.length > 0 && (
+              <Link href={`/credentials/${credentialId}/courses/${courseId}/perkenalan`}>
+                <Button variant="outline">Open threads</Button>
+              </Link>
+            )}
           </CardContent>
         </Card>
 
@@ -186,10 +258,56 @@ export function CourseActions({
             Scrapes all session tabs and finds Diskusi forums in each.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex gap-2">
           <Button onClick={collectSessions} disabled={sessionsBusy}>
             {sessionsBusy ? "Collecting..." : sessions.length > 0 ? "Refresh" : "Collect sessions"}
           </Button>
+          {diskusiForumCount > 0 && (
+            <Button onClick={refreshAllDiskusi} disabled={allDiskusiBusy} variant="outline">
+              {allDiskusiBusy
+                ? "Refreshing all diskusi..."
+                : `Refresh all diskusi (${diskusiForumCount})`}
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle>Deep collect material</CardTitle>
+            {materiAt && (
+              <Badge variant="secondary">
+                {new Date(materiAt).toLocaleDateString()}
+              </Badge>
+            )}
+          </div>
+          <CardDescription>
+            Walks every session tab and writes the instruction as Markdown plus all attached
+            files into per-session folders, ready to hand to a local agent.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={collectMaterial} disabled={materiBusy}>
+              {materiBusy
+                ? "Collecting... (watch Activity log)"
+                : materiPath
+                  ? "Re-collect"
+                  : "Collect material"}
+            </Button>
+            {materiPath && (
+              <Link href={`/credentials/${credentialId}/courses/${courseId}/materi`}>
+                <Button variant="outline">View material</Button>
+              </Link>
+            )}
+          </div>
+          {materiPath && (
+            <p className="text-xs text-muted-foreground">
+              Output:{" "}
+              <code className="select-all rounded bg-muted px-1 py-0.5">{materiPath}</code>
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -286,9 +404,14 @@ export function CourseActions({
 
       {discussions.length > 0 && (
         <div>
-          <h2 className="mb-3 text-lg font-semibold">
-            Discussions ({discussions.length})
-          </h2>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-lg font-semibold">
+              Discussions ({discussions.length})
+            </h2>
+            <Link href={`/credentials/${credentialId}/courses/${courseId}/perkenalan`}>
+              <Button size="sm" variant="outline">Batch reply</Button>
+            </Link>
+          </div>
           <Table>
             <TableHeader>
               <TableRow>

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getSession } from "@/lib/playwright/session";
+import { ensureLoggedIn } from "@/lib/playwright/session";
+import { acquireCredentialLock } from "@/lib/playwright/lock";
 import { scrapeSessions } from "@/lib/playwright/ut-sessions";
 import { saveSessions } from "@/lib/sessions";
 import { getCourse } from "@/lib/courses";
@@ -25,8 +26,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "course not found" }, { status: 404 });
   }
 
+  const release = await acquireCredentialLock(credentialId);
   try {
-    const session = await getSession(credentialId);
+    const session = await ensureLoggedIn(credentialId);
     const sessions = await scrapeSessions(session.page, course.url);
     await saveSessions(credentialId, courseId, sessions);
     return NextResponse.json({ count: sessions.length, sessions });
@@ -35,5 +37,7 @@ export async function POST(req: Request) {
       { error: err instanceof Error ? err.message : String(err) },
       { status: 500 },
     );
+  } finally {
+    release();
   }
 }

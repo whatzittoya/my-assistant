@@ -126,7 +126,7 @@ async function buildDiskusiEvidence(
     );
 
     for (const post of posts) {
-      if (post.isMyPost || post.depth !== 1) continue;
+      if (post.isMyPost) continue;
       const userId = userIdFromUrl(post.authorUrl);
       const studentNo = extractStudentNo(post.author);
       if (!findGradebookStudent(students, userId, studentNo)) continue;

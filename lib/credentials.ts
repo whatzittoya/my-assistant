@@ -11,6 +11,7 @@ type StoredCredential = {
   passwordCt: string;
   passwordIv: string;
   passwordTag: string;
+  diskusiSkillId?: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 };
@@ -20,6 +21,7 @@ function toPublic(id: string, d: StoredCredential): Credential {
     id,
     label: d.label,
     username: d.username,
+    diskusiSkillId: d.diskusiSkillId,
     createdAt: d.createdAt.toDate().toISOString(),
     updatedAt: d.updatedAt.toDate().toISOString(),
   };
@@ -68,7 +70,7 @@ export async function createCredential(input: {
 
 export async function updateCredential(
   id: string,
-  input: { label?: string; username?: string; password?: string },
+  input: { label?: string; username?: string; password?: string; diskusiSkillId?: string },
 ): Promise<Credential | null> {
   const ref = db().collection(COL).doc(id);
   const doc = await ref.get();
@@ -76,6 +78,7 @@ export async function updateCredential(
   const patch: Partial<StoredCredential> = { updatedAt: Timestamp.now() };
   if (input.label !== undefined) patch.label = input.label;
   if (input.username !== undefined) patch.username = input.username;
+  if (input.diskusiSkillId !== undefined) patch.diskusiSkillId = input.diskusiSkillId;
   if (input.password !== undefined) {
     const enc = encrypt(input.password);
     patch.passwordCt = enc.ct;

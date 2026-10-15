@@ -6,15 +6,26 @@ function col(credentialId: string) {
   return db().collection("credentials").doc(credentialId).collection("courses");
 }
 
+type CourseDoc = {
+  name: string;
+  url: string;
+  forumPerkenalan?: string;
+  materiPath?: string;
+  materiCollectedAt?: string;
+  collectedAt: Timestamp;
+};
+
 export async function listCourses(credentialId: string): Promise<Course[]> {
   const snap = await col(credentialId).orderBy("name").get();
   return snap.docs.map((d) => {
-    const data = d.data() as { name: string; url: string; forumPerkenalan?: string; collectedAt: Timestamp };
+    const data = d.data() as CourseDoc;
     return {
       courseId: d.id,
       name: data.name,
       url: data.url,
       forumPerkenalan: data.forumPerkenalan,
+      materiPath: data.materiPath,
+      materiCollectedAt: data.materiCollectedAt,
       collectedAt: data.collectedAt.toDate().toISOString(),
     };
   });
@@ -23,12 +34,14 @@ export async function listCourses(credentialId: string): Promise<Course[]> {
 export async function getCourse(credentialId: string, courseId: string): Promise<Course | null> {
   const doc = await col(credentialId).doc(courseId).get();
   if (!doc.exists) return null;
-  const data = doc.data() as { name: string; url: string; forumPerkenalan?: string; collectedAt: Timestamp };
+  const data = doc.data() as CourseDoc;
   return {
     courseId: doc.id,
     name: data.name,
     url: data.url,
     forumPerkenalan: data.forumPerkenalan,
+    materiPath: data.materiPath,
+    materiCollectedAt: data.materiCollectedAt,
     collectedAt: data.collectedAt.toDate().toISOString(),
   };
 }
@@ -49,4 +62,14 @@ export async function updateCourseForumUrl(
   forumUrl: string,
 ): Promise<void> {
   await col(credentialId).doc(courseId).update({ forumPerkenalan: forumUrl });
+}
+
+export async function updateCourseMateri(
+  credentialId: string,
+  courseId: string,
+  materiPath: string,
+): Promise<void> {
+  await col(credentialId)
+    .doc(courseId)
+    .update({ materiPath, materiCollectedAt: new Date().toISOString() });
 }

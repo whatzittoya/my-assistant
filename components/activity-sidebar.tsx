@@ -43,7 +43,11 @@ export function ActivitySidebar() {
     es.onmessage = (e) => {
       try {
         const entry: LogEntry = JSON.parse(e.data);
-        setEntries((prev) => [...prev.slice(-199), entry]);
+        setEntries((prev) =>
+          prev.some((p) => p.id === entry.id)
+            ? prev // already have it (SSE replay on reconnect)
+            : [...prev.slice(-199), entry]
+        );
       } catch { /* ignore malformed */ }
     };
 

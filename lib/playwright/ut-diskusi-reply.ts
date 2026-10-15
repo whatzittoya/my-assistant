@@ -1,5 +1,6 @@
 import { Page } from "playwright";
 import { logger } from "@/lib/activity-log";
+import { throwIfLoggedOut } from "./ut-login";
 
 /**
  * Posts a tutor reply to a specific student post in a Diskusi forum thread,
@@ -16,9 +17,7 @@ export async function postDiskusiReply(
   await page.goto(discussionUrl, { waitUntil: "domcontentloaded" });
   await page
     .waitForSelector("article[data-region='post']", { timeout: 15000 })
-    .catch(() => {
-      throw new Error("Posts not found — may not be logged in");
-    });
+    .catch(() => throwIfLoggedOut(page, new Error("Posts not found on discussion page")));
 
   // Click the Reply link scoped to the specific post
   const replyLink = page.locator(

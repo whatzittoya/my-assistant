@@ -1,5 +1,6 @@
 import { Page } from "playwright";
 import { logger } from "@/lib/activity-log";
+import { throwIfLoggedOut } from "./ut-login";
 
 /**
  * Navigates to a Forum Perkenalan discussion, clicks Reply on the root post,
@@ -14,9 +15,7 @@ export async function postForumReply(
   await page.goto(discussionUrl, { waitUntil: "domcontentloaded" });
   await page
     .waitForSelector("article[data-region='post']", { timeout: 15000 })
-    .catch(() => {
-      throw new Error("Discussion posts not found — may not be logged in");
-    });
+    .catch(() => throwIfLoggedOut(page, new Error("Discussion posts not found")));
 
   // Click the Reply link on the root (first) post
   // Selector: collapsible-link action = triggers inline reply form

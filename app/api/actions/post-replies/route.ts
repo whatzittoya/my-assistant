@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getSession } from "@/lib/playwright/session";
+import { ensureLoggedIn, withRelogin } from "@/lib/playwright/session";
+import { acquireCredentialLock } from "@/lib/playwright/lock";
 import { postForumReply } from "@/lib/playwright/ut-reply";
 import { updateDiscussionReplied } from "@/lib/discussions";
 import { logger } from "@/lib/activity-log";
@@ -18,8 +19,8 @@ const ItemSchema = z.object({
 const Body = z.object({
   credentialId: z.string().min(1),
   items: z.array(ItemSchema).min(1),
-  delayMin: z.number().min(1).max(60).default(5),
-  delayMax: z.number().min(1).max(60).default(6),
+  delayMin: z.number().min(1).max(600).default(5),
+  delayMax: z.number().min(1).max(600).default(6),
 });
 
 function sleep(ms: number) {
@@ -43,8 +44,9 @@ export async function POST(req: Request) {
     error?: string;
   }> = [];
 
+  const release = await acquireCredentialLock(credentialId);
   try {
-    const session = await getSession(credentialId);
+    await ensureLoggedIn(credentialId);
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
@@ -53,7 +55,9 @@ export async function POST(req: Request) {
       );
 
       try {
-        await postForumReply(session.page, item.discussionUrl, item.reply);
+        await withRelogin(credentialId, (page) =>
+          postForumReply(page, item.discussionUrl, item.reply),
+        );
         await updateDiscussionReplied(credentialId, item.courseId, item.discussionId, true);
         results.push({ discussionId: item.discussionId, status: "ok" });
       } catch (err) {
@@ -80,5 +84,7 @@ export async function POST(req: Request) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.err(msg);
     return NextResponse.json({ error: msg }, { status: 500 });
+  } finally {
+    release();
   }
 }

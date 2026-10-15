@@ -4,6 +4,7 @@ import { useMemo, useRef, useState, useEffect } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { Post } from "@/types";
+import { cleanPostHtml } from "@/lib/post-html";
 
 type Node = Post & { children: Node[] };
 
@@ -39,7 +40,8 @@ function fmtDate(iso: string): string {
 
 const CLAMP_PX = 120;
 
-function CollapsibleContent({ html }: { html: string }) {
+export function CollapsibleContent({ html: rawHtml }: { html: string }) {
+  const html = useMemo(() => cleanPostHtml(rawHtml), [rawHtml]);
   const ref = useRef<HTMLDivElement>(null);
   const [overflow, setOverflow] = useState(false);
   const [expanded, setExpanded] = useState(false);

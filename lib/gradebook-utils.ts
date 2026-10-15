@@ -32,10 +32,13 @@ export function normalizeHtmlFeedback(feedback: string | null | undefined): stri
 
 export function classifyGradebookItem(name: string, url: string): GradebookItem["kind"] | null {
   const cleanName = name.replace(/\s+/g, " ").trim();
-  if (/^Diskusi\s+\d+\s+rating$/i.test(cleanName) && /\/mod\/forum\/view\.php/i.test(url)) {
+  // Moodle course templates use both "Diskusi 1" and dot-separated names such
+  // as "Forum Diskusi.1" / "Tugas.1" for the same activity types.
+  const normalizedName = cleanName.replace(/[.:-]\s*(?=\d+\b)/g, " ");
+  if (/^(?:Forum\s+)?Diskusi\s+\d+\s+rating$/i.test(normalizedName) && /\/mod\/forum\/view\.php/i.test(url)) {
     return "diskusi";
   }
-  if (/^Tugas\s+\d+$/i.test(cleanName) && /\/mod\/assign\/view\.php/i.test(url)) {
+  if (/^Tugas\s+\d+$/i.test(normalizedName) && /\/mod\/assign\/view\.php/i.test(url)) {
     return "tugas";
   }
   return null;

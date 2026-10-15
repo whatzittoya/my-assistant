@@ -39,6 +39,8 @@ export default async function CoursePage({
         courseId={courseId}
         courseUrl={course.url}
         hasForumUrl={!!course.forumPerkenalan}
+        initialMateriPath={course.materiPath}
+        initialMateriAt={course.materiCollectedAt}
         initialDiscussions={discussions}
         initialSessions={sessions}
       />

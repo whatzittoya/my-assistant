@@ -27,13 +27,34 @@ export default async function SubmissionDetailPage({
 
   if (!cred || !course || !submission) notFound();
 
-  const tugasActivity = sessions
+  const tugasOrder = sessions
     .flatMap((s) => s.tugas)
-    .find((t) => t.url.includes(`id=${assignId}`));
-  const tugasName = tugasActivity?.name ?? `Tugas ${assignId}`;
+    .map((t) => ({
+      assignId: t.url.match(/[?&]id=(\d+)/)?.[1] ?? "",
+      name: t.name,
+    }))
+    .filter((t) => t.assignId);
+
+  const currentIdx = tugasOrder.findIndex((t) => t.assignId === assignId);
+  const previousTugas = currentIdx > 0 ? tugasOrder[currentIdx - 1] : null;
+  const tugasName =
+    currentIdx >= 0 ? tugasOrder[currentIdx].name : `Tugas ${assignId}`;
+
+  const previousSubmission = previousTugas
+    ? await getSubmission(id, courseId, previousTugas.assignId, userId)
+    : null;
+  const previousFeedback =
+    previousSubmission?.finalEval?.feedback?.trim()
+      ? {
+          tugasName: previousTugas!.name,
+          assignId: previousTugas!.assignId,
+          feedback: previousSubmission.finalEval.feedback,
+          savedAt: previousSubmission.finalEval.savedAt,
+        }
+      : null;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 relative left-1/2 w-[min(calc(100vw-18rem-4rem),1400px)] -translate-x-1/2">
       <div>
         <p className="text-sm text-muted-foreground">
           <Link href={`/credentials/${id}`} className="hover:underline">{cred.label}</Link>
@@ -48,12 +69,14 @@ export default async function SubmissionDetailPage({
       </div>
 
       <SubmissionDetail
+        key={`${assignId}-${userId}`}
         submission={submission}
         meta={meta}
         credentialId={id}
         courseId={courseId}
         assignId={assignId}
         allSubmissions={allSubmissions.map((s) => ({ userId: s.userId, name: s.name }))}
+        previousFeedback={previousFeedback}
       />
     </div>
   );
