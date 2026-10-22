@@ -1,10 +1,11 @@
-import { RUBRIC_RESPONSE_INSTRUCTION } from "@/lib/tugas-instructions";
+import { rubricResponseInstruction } from "@/lib/tugas-instructions";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import { gemini, geminiDisabledResponse } from "@/lib/gemini";
 import { getSkill } from "@/lib/skills";
+import { getCredential } from "@/lib/credentials";
 import { getTugasMeta } from "@/lib/tugas-meta";
 import { listTugasSubmissions, saveAiEval } from "@/lib/tugas";
 import { Type } from "@google/genai";
@@ -41,10 +42,11 @@ export async function POST(req: Request) {
 
   const { credentialId, courseId, assignId, skillId, model, userIds } = parsed.data;
 
-  const [skill, meta, allSubmissions] = await Promise.all([
+  const [skill, meta, allSubmissions, credential] = await Promise.all([
     getSkill(skillId),
     getTugasMeta(credentialId, courseId, assignId),
     listTugasSubmissions(credentialId, courseId, assignId),
+    getCredential(credentialId),
   ]);
 
   if (!skill)
@@ -75,7 +77,7 @@ export async function POST(req: Request) {
     skill.systemPrompt,
     meta.description ? `\nDeskripsi Tugas:\n${meta.description}` : "",
     pedomanBlock || "",
-    RUBRIC_RESPONSE_INSTRUCTION,
+    rubricResponseInstruction(credential?.tugasFeedbackFormat),
   ]
     .filter(Boolean)
     .join("\n\n");

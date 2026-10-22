@@ -1,3 +1,5 @@
+import type { TugasFeedbackFormat } from "@/types";
+
 // Shared by the in-app Gemini evaluator and the "export to external AI" instruction.
 export const RUBRIC_RESPONSE_INSTRUCTION = [
   "Cara Menilai & Menyusun Respons:",
@@ -74,3 +76,21 @@ export const RUBRIC_RESPONSE_INSTRUCTION = [
   "- Jika ada masalah format file, misalnya cover salah fakultas, tulis dua kalimat penutup terpisah setelah bullet Referensi.",
   "- Acuan skor dari respons dosen sebelumnya: 90 sampai 95 jika konsep modul, fakta kasus dan referensi sudah baik. 82 sampai 89 jika lengkap tapi ada konsep belum disebut atau referensi kurang rapi. 75 sampai 81 jika umum, tanpa konsep modul atau referensi lemah. 70 sampai 74 jika generik, ringkas, tanpa referensi atau ada indikasi AI. 60 sampai 69 jika sangat singkat atau banyak soal belum terjawab.",
 ].join("\n");
+
+// Appended for credentials whose tugas feedback is prose, not bullets. It sits
+// last so it overrides every bullet/label rule above.
+const PARAGRAF_OVERRIDE = [
+  "FORMAT FEEDBACK PARAGRAF (menggantikan semua aturan bullet di atas):",
+  "- Field \"feedback\" ditulis sebagai satu paragraf berisi beberapa kalimat yang saling menyambung, bukan poin. Jangan memakai bullet, tanda -, penomoran, label \"<poin rubrik>:\", \"Referensi:\" atau baris baru per poin.",
+  "- Isi tetap mengikuti urutan rubrik: bahas tiap poin rubrik secara berurutan di dalam paragraf, lalu tutup dengan kalimat tentang referensi.",
+  "- Sambungkan antar poin dengan kata hubung yang wajar (lalu, untuk bagian ..., selain itu, tapi, sedangkan, jadi) supaya terbaca seperti satu catatan dosen yang mengalir.",
+  "- Poin yang sudah sesuai cukup disinggung singkat di dalam kalimat (mis. \"analisis lingkungan sudah sesuai, tapi ...\"). Fokus tetap pada hal yang perlu diperbaiki.",
+  "- Kalimat pembuka sesuai pola tugas (mis. \"Baik, <nama depan>. Terima kasih atas hasil pengerjaannya.\") boleh tetap ada di awal paragraf yang sama.",
+  "- Panjang sekitar 3 sampai 6 kalimat. Semua aturan isi, gaya, skor dan keaslian di atas tetap berlaku.",
+].join("\n");
+
+export function rubricResponseInstruction(format: TugasFeedbackFormat = "poin"): string {
+  return format === "paragraf"
+    ? `${RUBRIC_RESPONSE_INSTRUCTION}\n\n${PARAGRAF_OVERRIDE}`
+    : RUBRIC_RESPONSE_INSTRUCTION;
+}

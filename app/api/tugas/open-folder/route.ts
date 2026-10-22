@@ -13,13 +13,15 @@ export async function POST(req: Request) {
   const { path: rel } = (await req.json()) as { path?: string };
   if (!rel) return NextResponse.json({ error: "path required" }, { status: 400 });
 
-  const resolved = path.resolve(FILES_BASE, rel);
+  // localPath is stored with the OS separator (backslashes on Windows).
+  let resolved = path.resolve(FILES_BASE, rel.replace(/[\\/]/g, path.sep));
   if (!resolved.startsWith(FILES_BASE + path.sep)) {
     return NextResponse.json({ error: "Invalid path" }, { status: 403 });
   }
   if (!fs.existsSync(resolved)) {
     return NextResponse.json({ error: "Folder not found" }, { status: 404 });
   }
+  if (!fs.statSync(resolved).isDirectory()) resolved = path.dirname(resolved);
 
   const cmd =
     process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open";

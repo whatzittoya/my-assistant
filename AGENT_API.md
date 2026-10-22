@@ -132,5 +132,51 @@ login → /api/actions/sessions  (find assignId)
 - Set `PLAYWRIGHT_HEADED=0` (headless).
 - Set `AGENT_REQUIRE_KEY=always` so the key is required on every request (the
   `cf-connecting-ip` tunnel check in `proxy.ts` only applies to Cloudflare).
-- Next step beyond REST: wrap these same endpoints in an MCP server so MCP-aware
-  agents auto-discover them as tools. This file is the tool manifest for that.
+
+## MCP
+
+The same actions are exposed as MCP tools at `/api/mcp` (Streamable HTTP,
+stateless; `lib/mcp/server.ts`). Tools call the route handlers above
+in-process, so behaviour, validation and per-credential queuing are identical.
+Auth is the same bearer key via `proxy.ts`.
+
+Agent on the same machine (Claude Code, incl. remote-control sessions) — no
+key, no tunnel; localhost requests are exempt in `proxy.ts`:
+
+```bash
+claude mcp add --transport http ut-assistant http://localhost:3000/api/mcp
+```
+
+Only a remote agent going through the tunnel needs the key:
+
+```bash
+claude mcp add --transport http ut-assistant https://<id>.trycloudflare.com/api/mcp \
+  --header "Authorization: Bearer <AGENT_API_KEY>"
+```
+
+`generate_diskusi_replies` uses the credential's configured `diskusiSkillId`
+unless `skillId` is passed.
+
+Tools (31):
+
+- **Read:** `list_credentials`, `list_skills`, `list_courses`, `get_sessions`,
+  `get_discussions`, `get_session_diskusi`, `get_diskusi_posts` (posts as
+  markdown + question/pedoman/drafts; filter with `unrepliedOnly`, `postIds`,
+  `includeContent: false`), `get_gradebook` (compact score monitor,
+  `missingOnly`), `get_tugas_submissions`, `get_activity_log`
+- **Collect (browser):** `login`, `reset_session`, `collect_courses`,
+  `collect_sessions`, `collect_intro_forum`, `collect_discussions`,
+  `collect_session_diskusi`, `collect_course_diskusi`, `collect_rubrik_diskusi`,
+  `collect_tugas`, `collect_gradebook`, `collect_material`
+- **AI (Gemini, nothing posted; needs `GEMINI_ENABLED=1`):**
+  `generate_diskusi_replies`, `generate_replies`, `generate_reply`,
+  `evaluate_tugas` (overwrites stored AI evaluations; `model` defaults to
+  `GEMINI_MODEL`)
+- **Write (student-visible):** `post_diskusi_replies`, `post_replies`,
+  `grade_tugas`. **`dryRun` defaults to `true`** and returns a preview (student
+  name, current grade, already-replied, unknown ids); pass `dryRun: false` to
+  actually post. `grade_tugas` also takes `courseId` (for the preview).
+- **Jobs:** every collect/AI/write tool accepts `background: true` and returns a
+  `jobId` at once; poll `get_job` (or `list_jobs`). Use it for anything that
+  may exceed the client's tool timeout. Jobs live in memory and are lost on
+  server restart; the underlying data is already persisted.

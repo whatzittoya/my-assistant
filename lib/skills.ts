@@ -73,6 +73,33 @@ const DEFAULT_DISKUSI_SKILL: Skill = {
   updatedAt: "",
 };
 
+export const DEFAULT_TUGAS_SKILL_ID = "default-tugas";
+
+// Built-in skill for tugas (file submissions): one feedback bullet per rubric
+// point. Tone, opener and reference rules live in RUBRIC_RESPONSE_INSTRUCTION,
+// which the evaluate route appends after this prompt.
+const DEFAULT_TUGAS_SKILL: Skill = {
+  id: DEFAULT_TUGAS_SKILL_ID,
+  name: "Default Tugas (per rubrik)",
+  systemPrompt: [
+    "Kamu membantu seorang tutor Universitas Terbuka menilai tugas tutorial mahasiswa yang diunggah sebagai file. Feedback langsung dikirim ke mahasiswa sebagai komentar tutor, jadi harus terdengar ditulis tutor itu sendiri, bukan teks AI.",
+    "",
+    "Acuan penilaian adalah Pedoman Penilaian (rubrik) dan deskripsi tugas di prompt. Setiap poin rubrik memuat daftar konsep yang diharapkan muncul di jawaban.",
+    "",
+    "LANGKAH:",
+    "1. Baca soal dan rubrik, lalu baca jawaban mahasiswa per nomor soal.",
+    "2. Untuk tiap poin rubrik, cocokkan konsep yang diharapkan dengan isi jawaban. Skor penuh jika semua konsep inti ada dan dikaitkan dengan fakta kasus. Skor sebagian jika sebagian konsep hilang, hanya menyalin kalimat kasus, atau terlalu umum. Skor rendah jika salah arah atau tidak dijawab.",
+    "3. Tulis satu bullet feedback per poin rubrik, berurutan, hanya berisi konsep rubrik atau fakta kasus yang belum dibahas atau belum tepat. Poin yang sudah baik cukup \"<label>: sudah sesuai.\"",
+    "4. Tambahkan bullet terakhir \"Referensi:\" sesuai aturan review referensi.",
+    "",
+    "PENTING:",
+    "- Setiap feedback harus berdasarkan isi yang benar-benar ditulis mahasiswa. Jangan menyebut konsep atau contoh yang tidak ada di jawabannya kecuali sebagai konsep rubrik yang belum dibahas.",
+    "- Jangan menyebut angka skor atau bobot rubrik di teks feedback.",
+    "- Jawaban yang mirip persis dengan mahasiswa lain atau terlihat ditempel dari AI: tulis temuannya singkat dan minta menjawab dengan bahasa sendiri.",
+  ].join("\n"),
+  updatedAt: "",
+};
+
 function col() {
   return db().collection("skills");
 }
@@ -89,7 +116,7 @@ function toSkill(id: string, data: FirebaseFirestore.DocumentData): Skill {
 export async function listSkills(): Promise<Skill[]> {
   const snap = await col().orderBy("name").get();
   const list = snap.docs.map((d) => toSkill(d.id, d.data()));
-  const builtIns = [DEFAULT_SKILL, DEFAULT_DISKUSI_SKILL].filter(
+  const builtIns = [DEFAULT_SKILL, DEFAULT_TUGAS_SKILL, DEFAULT_DISKUSI_SKILL].filter(
     (b) => !list.some((s) => s.id === b.id),
   );
   return [...builtIns, ...list];
@@ -99,6 +126,7 @@ export async function getSkill(id: string): Promise<Skill | null> {
   const doc = await col().doc(id).get();
   if (!doc.exists) {
     if (id === DEFAULT_SKILL_ID) return DEFAULT_SKILL;
+    if (id === DEFAULT_TUGAS_SKILL_ID) return DEFAULT_TUGAS_SKILL;
     if (id === DEFAULT_DISKUSI_SKILL_ID) return DEFAULT_DISKUSI_SKILL;
     return null;
   }

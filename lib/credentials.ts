@@ -1,6 +1,6 @@
 import { db } from "@/lib/firebase-admin";
 import { encrypt, decrypt } from "@/lib/crypto";
-import type { Credential, CredentialWithSecret } from "@/types";
+import type { Credential, CredentialWithSecret, TugasFeedbackFormat } from "@/types";
 import { Timestamp } from "firebase-admin/firestore";
 
 const COL = "credentials";
@@ -12,6 +12,7 @@ type StoredCredential = {
   passwordIv: string;
   passwordTag: string;
   diskusiSkillId?: string;
+  tugasFeedbackFormat?: TugasFeedbackFormat;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 };
@@ -22,6 +23,7 @@ function toPublic(id: string, d: StoredCredential): Credential {
     label: d.label,
     username: d.username,
     diskusiSkillId: d.diskusiSkillId,
+    tugasFeedbackFormat: d.tugasFeedbackFormat,
     createdAt: d.createdAt.toDate().toISOString(),
     updatedAt: d.updatedAt.toDate().toISOString(),
   };
@@ -70,7 +72,13 @@ export async function createCredential(input: {
 
 export async function updateCredential(
   id: string,
-  input: { label?: string; username?: string; password?: string; diskusiSkillId?: string },
+  input: {
+    label?: string;
+    username?: string;
+    password?: string;
+    diskusiSkillId?: string;
+    tugasFeedbackFormat?: TugasFeedbackFormat;
+  },
 ): Promise<Credential | null> {
   const ref = db().collection(COL).doc(id);
   const doc = await ref.get();
@@ -79,6 +87,7 @@ export async function updateCredential(
   if (input.label !== undefined) patch.label = input.label;
   if (input.username !== undefined) patch.username = input.username;
   if (input.diskusiSkillId !== undefined) patch.diskusiSkillId = input.diskusiSkillId;
+  if (input.tugasFeedbackFormat !== undefined) patch.tugasFeedbackFormat = input.tugasFeedbackFormat;
   if (input.password !== undefined) {
     const enc = encrypt(input.password);
     patch.passwordCt = enc.ct;

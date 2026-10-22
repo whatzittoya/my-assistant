@@ -1,6 +1,6 @@
 "use client";
 
-import { RUBRIC_RESPONSE_INSTRUCTION } from "@/lib/tugas-instructions";
+import { rubricResponseInstruction } from "@/lib/tugas-instructions";
 import React, { useEffect, useState } from "react";
 import { cleanPostHtml } from "@/lib/post-html";
 import Link from "next/link";
@@ -24,7 +24,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { TugasSubmission, TugasMeta, PedomanItem, CriteriaScore } from "@/types";
+import type { TugasSubmission, TugasMeta, PedomanItem, CriteriaScore, TugasFeedbackFormat } from "@/types";
 import type { Skill } from "@/lib/skills";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -142,9 +142,9 @@ function TugasExportDialog({
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+      <DialogContent className="sm:max-w-4xl max-h-[85vh] flex flex-col">
         <DialogHeader><DialogTitle>Export for AI / Import Result</DialogTitle></DialogHeader>
-        <div className="flex gap-0 border-b">
+        <div className="flex gap-0 border-b overflow-x-auto shrink-0">
           {tabs.map((t) => (
             <button key={t.id} onClick={() => setTab(t.id)}
               className={`px-4 py-2 text-sm border-b-2 transition-colors whitespace-nowrap ${tab === t.id ? "border-foreground font-medium" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
@@ -152,7 +152,7 @@ function TugasExportDialog({
             </button>
           ))}
         </div>
-        <div className="flex-1 overflow-auto space-y-3 pt-3">
+        <div className="flex-1 min-h-0 min-w-0 overflow-auto space-y-3 pt-3">
           {tab === "instruction" && (
             <>
               <p className="text-xs text-muted-foreground">Send this as system prompt, then send Assignment JSON.</p>
@@ -177,7 +177,7 @@ function TugasExportDialog({
           {tab === "upload" && (
             <>
               <p className="text-xs text-muted-foreground">Paste AI response JSON. Supports <code>criteriaScores</code> (new) and <code>score</code> (legacy) formats.</p>
-              <Textarea value={uploadText} onChange={(e) => parseUpload(e.target.value)} rows={8} className="text-xs font-mono"
+              <Textarea value={uploadText} onChange={(e) => parseUpload(e.target.value)} rows={8} className="text-xs font-mono w-full max-h-64 break-all"
                 placeholder={'{"results":[{"name":"...","criteriaScores":[...],"totalScore":85,"reasoning":"...","feedback":"..."}]}'} />
               {parseError && <p className="text-xs text-destructive">{parseError}</p>}
               {parsed.length > 0 && (
@@ -188,10 +188,10 @@ function TugasExportDialog({
                       const total = r.totalScore ?? r.score ?? 0;
                       return (
                         <div key={i} className="rounded border p-2 text-xs flex items-center gap-2">
-                          <span className="font-semibold flex-1">{r.name ?? r.userId ?? `#${i + 1}`}</span>
+                          <span className="font-semibold flex-1 min-w-0 truncate">{r.name ?? r.userId ?? `#${i + 1}`}</span>
                           <span className={`rounded-full px-2 py-0.5 font-semibold ${scoreColorPct(total, 100)}`}>{total}</span>
                           {r.criteriaScores && r.criteriaScores.length > 0 && <span className="text-muted-foreground">{r.criteriaScores.length} criteria</span>}
-                          <span className="text-muted-foreground truncate max-w-[200px]">{r.feedback}</span>
+                          <span className="text-muted-foreground truncate min-w-0 flex-[2]">{r.feedback}</span>
                         </div>
                       );
                     })}
@@ -520,6 +520,7 @@ export function TugasActions({
   const [skills, setSkills] = useState<Skill[]>([]);
   const [skillId, setSkillId] = useState("");
   const [model, setModel] = useState(MODELS[0].id);
+  const [feedbackFormat, setFeedbackFormat] = useState<TugasFeedbackFormat>("poin");
 
   const [description, setDescription] = useState(initialMeta.description);
   const [pedomanItems, setPedomanItems] = useState<PedomanItem[]>(
@@ -572,7 +573,22 @@ export function TugasActions({
         if (list.length > 0) setSkillId(list.find((s) => s.id === "default")?.id ?? list[0].id);
       })
       .catch(() => {});
-  }, []);
+    fetch(`/api/credentials/${credentialId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((cred) => { if (cred?.tugasFeedbackFormat) setFeedbackFormat(cred.tugasFeedbackFormat); })
+      .catch(() => {});
+  }, [credentialId]);
+
+  // Feedback format is a per-credential preference, saved on change.
+  async function changeFeedbackFormat(format: TugasFeedbackFormat) {
+    setFeedbackFormat(format);
+    const res = await fetch(`/api/credentials/${credentialId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tugasFeedbackFormat: format }),
+    });
+    if (!res.ok) toast.error("Failed to save feedback format");
+  }
 
   const totalMax = pedomanItems.reduce((sum, item) => sum + item.maxScore, 0) || 100;
 
@@ -622,7 +638,7 @@ export function TugasActions({
 
   const assignFolder = (() => {
     const lp = submissions.flatMap((s) => s.files ?? []).find((f) => f.localPath)?.localPath;
-    return lp ? lp.split("/").slice(0, 2).join("/") : null;
+    return lp ? lp.split(/[\\/]/).slice(0, 2).join("/") : null;
   })();
 
   async function openFolder() {
@@ -843,7 +859,7 @@ export function TugasActions({
     skills.find((s) => s.id === skillId)?.systemPrompt ?? "",
     description ? `\nDeskripsi Tugas:\n${description}` : "",
     pedomanBlock || "",
-    RUBRIC_RESPONSE_INSTRUCTION,
+    rubricResponseInstruction(feedbackFormat),
     `\nFormat kembalikan JSON:\n${JSON.stringify(
       {
         results: [
@@ -881,7 +897,7 @@ export function TugasActions({
           userId: s.userId,
           name: s.name,
           files: s.files.map((f) =>
-            f.localPath ? f.localPath.split("/").pop()! : f.filename
+            f.localPath ? f.localPath.split(/[\\/]/).pop()! : f.filename
           ),
         })),
     },
@@ -1155,6 +1171,17 @@ export function TugasActions({
             {MODELS.map((m) => (
               <option key={m.id} value={m.id}>{m.label}</option>
             ))}
+          </select>
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">Feedback format</label>
+          <select
+            value={feedbackFormat}
+            onChange={(e) => changeFeedbackFormat(e.target.value as TugasFeedbackFormat)}
+            className="rounded-md border bg-background px-3 py-1.5 text-sm"
+          >
+            <option value="poin">Poin per rubrik</option>
+            <option value="paragraf">Paragraf (kalimat menyambung)</option>
           </select>
         </div>
       </Section>
@@ -1441,11 +1468,23 @@ export function TugasActions({
           <button onClick={() => setViewingFile(null)} className="text-muted-foreground hover:text-foreground shrink-0 text-lg leading-none">✕</button>
         </div>
 
-        <iframe
-          src={`/api/tugas/files?path=${encodeURIComponent(viewingFile.localPath)}`}
-          className="flex-1 w-full rounded border bg-muted/20 min-h-0"
-          title={viewingFile.filename}
-        />
+        {/\.(pdf|png|jpe?g|txt)$/i.test(viewingFile.localPath) ? (
+          <iframe
+            src={`/api/tugas/files?path=${encodeURIComponent(viewingFile.localPath)}`}
+            className="flex-1 w-full rounded border bg-muted/20 min-h-0"
+            title={viewingFile.filename}
+          />
+        ) : (
+          // Word/Office files can't render inline; loading them in the iframe would auto-download.
+          <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-3 rounded border bg-muted/20 p-4 text-center">
+            <p className="text-sm text-muted-foreground">Preview not available for this file type.</p>
+            <Button asChild size="sm">
+              <a href={`/api/tugas/files?path=${encodeURIComponent(viewingFile.localPath)}`} download={viewingFile.filename}>
+                Download {viewingFile.localPath.split(/[\\/]/).pop()}
+              </a>
+            </Button>
+          </div>
+        )}
 
         <div className="space-y-2 shrink-0">
           {sidebarResult ? (

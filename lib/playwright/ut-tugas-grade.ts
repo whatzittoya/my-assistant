@@ -1,6 +1,17 @@
 import type { Page } from "playwright";
 import { logger } from "@/lib/activity-log";
 
+// UT stores feedback as HTML, so plain newlines collapse; one <p> per line keeps each rubric point on its own line.
+function toHtmlParagraphs(text: string): string {
+  if (/<p[\s>]/i.test(text)) return text;
+  return text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => `<p>${l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>`)
+    .join("\n");
+}
+
 export type GradeItem = {
   userId: string;
   score: number;
@@ -77,7 +88,7 @@ export async function postTugasGrades(
       // Feedback textarea — in feedback comments cell (c10)
       const feedbackArea = await row.$('td.c10 textarea, textarea[name="quickfeedbackcomments[' + userId + ']"]');
       if (feedbackArea) {
-        await feedbackArea.fill(feedback);
+        await feedbackArea.fill(toHtmlParagraphs(feedback));
         logger.info(`Set feedback for userId=${userId}`);
       } else {
         logger.warn(`Feedback textarea not found for userId=${userId}`);

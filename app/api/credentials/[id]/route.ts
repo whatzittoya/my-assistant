@@ -9,6 +9,7 @@ const UpdateSchema = z.object({
   username: z.string().min(1).optional(),
   password: z.string().min(1).optional(),
   diskusiSkillId: z.string().min(1).optional(),
+  tugasFeedbackFormat: z.enum(["poin", "paragraf"]).optional(),
 });
 
 export async function GET(_: Request, ctx: { params: Promise<{ id: string }> }) {

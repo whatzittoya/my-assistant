@@ -85,6 +85,28 @@ async function downloadFile(
   }
 }
 
+// Full text of a feedback comment that the grading table truncates. Fetched
+// inside the page so the logged-in session cookies are used.
+async function fetchFullFeedback(page: Page, url: string): Promise<string | null> {
+  try {
+    const text = await page.evaluate(async (u) => {
+      const res = await fetch(u, { credentials: "include" });
+      if (!res.ok) return null;
+      const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+      const main = doc.querySelector("#region-main") ?? doc.body;
+      main.querySelectorAll("script, style, nav, .breadcrumb, h2, .accesshide").forEach((e) => e.remove());
+      const html = main.innerHTML.replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|li)>/gi, "</$1>\n");
+      const d = document.createElement("div");
+      d.innerHTML = html;
+      return (d.textContent ?? "").replace(/\u00a0/g, " ").replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n").trim();
+    }, url);
+    return text || null;
+  } catch (e) {
+    logger.warn(`Full feedback fetch failed: ${e instanceof Error ? e.message : String(e)}`);
+    return null;
+  }
+}
+
 export async function scrapeTugasSubmissions(
   page: Page,
   assignId: string,
@@ -172,13 +194,17 @@ export async function scrapeTugasSubmissions(
       .$eval(".cell.c4", (el) => el.textContent?.trim() ?? "")
       .catch(() => "");
 
-    // grade from c5 — strip button/image text
+    // grade from c5 — strip button/image text. In quick-grading (edit) mode the
+    // grade is an <input class="quickgrade">, so swap it for its value first.
     const grade = await row
       .$eval(".cell.c5", (el) => {
         const clone = el.cloneNode(true) as HTMLElement;
-        clone.querySelectorAll("a, img, br").forEach((e) => e.remove());
-        const t = clone.textContent?.replace(/\s+/g, " ").trim() ?? "";
-        return t === "-" || t === "" ? null : t;
+        clone.querySelectorAll("input.quickgrade").forEach((inp) => {
+          inp.replaceWith((inp as HTMLInputElement).value);
+        });
+        clone.querySelectorAll("a, img, br, label, .accesshide").forEach((e) => e.remove());
+        const t = clone.textContent?.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim() ?? "";
+        return t === "-" || t === "" || t.startsWith("/") ? null : t;
       })
       .catch(() => null);
 
@@ -195,10 +221,32 @@ export async function scrapeTugasSubmissions(
       })
       .catch(() => null);
 
-    // feedbackComment from c10
-    const feedbackComment = await row
-      .$eval(".cell.c10", (el) => el.textContent?.trim() ?? "")
-      .catch(() => "");
+    // feedbackComment from c10. Quick-grading (edit) mode holds the full comment
+    // as HTML in a <textarea class="quickgrade">; otherwise the cell shows a
+    // truncated preview ending in "..." plus a link to the full comment.
+    const feedbackCell = await row
+      .$eval(".cell.c10", (el) => {
+        const toText = (html: string) => {
+          const d = document.createElement("div");
+          d.innerHTML = html
+            .replace(/<br\s*\/?>/gi, "\n")
+            .replace(/<\/(p|div|li)>/gi, "</$1>\n");
+          return (d.textContent ?? "").replace(/\u00a0/g, " ").replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n").trim();
+        };
+        const ta = el.querySelector("textarea.quickgrade") as HTMLTextAreaElement | null;
+        if (ta) return { text: toText(ta.value), full: true, href: "" };
+        const clone = el.cloneNode(true) as HTMLElement;
+        const href =
+          (el.querySelector('a[href*="viewpluginassignfeedback"]') as HTMLAnchorElement | null)?.href ?? "";
+        clone.querySelectorAll("a, img, label, .accesshide").forEach((e) => e.remove());
+        const text = (clone.textContent ?? "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+        return { text, full: false, href };
+      })
+      .catch(() => ({ text: "", full: true, href: "" }));
+    let feedbackComment = feedbackCell.text;
+    if (!feedbackCell.full && feedbackCell.href && /(\.\.\.|…)$/.test(feedbackComment)) {
+      feedbackComment = (await fetchFullFeedback(page, feedbackCell.href)) ?? feedbackComment;
+    }
 
     // finalGrade from c11 — e.g. "87.00 / 100.00" → 87, or "-" → null
     const finalGrade = await row

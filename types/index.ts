@@ -1,8 +1,11 @@
+export type TugasFeedbackFormat = "poin" | "paragraf";
+
 export type Credential = {
   id: string;
   label: string;
   username: string;
   diskusiSkillId?: string; // preferred skill for forum diskusi replies
+  tugasFeedbackFormat?: TugasFeedbackFormat; // tugas feedback layout, default "poin"
   createdAt: string;
   updatedAt: string;
 };
