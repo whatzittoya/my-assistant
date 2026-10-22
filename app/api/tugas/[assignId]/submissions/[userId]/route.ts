@@ -45,6 +45,8 @@ const FinalEvalBody = z.object({
   courseId: z.string().min(1),
   type: z.literal("final"),
   criteriaScores: z.array(CriteriaScoreSchema),
+  // Manual grand total; when omitted it is the sum of criteria scores.
+  totalScore: z.number().min(0).optional(),
   feedback: z.string(),
 });
 
@@ -67,7 +69,8 @@ export async function PUT(req: Request, { params }: { params: Params }) {
         feedback: parsed.data.feedback,
       });
     } else {
-      const totalScore = parsed.data.criteriaScores.reduce((s, c) => s + c.score, 0);
+      const totalScore =
+        parsed.data.totalScore ?? parsed.data.criteriaScores.reduce((s, c) => s + c.score, 0);
       await saveFinalEval(credentialId, courseId, assignId, userId, {
         criteriaScores: parsed.data.criteriaScores,
         totalScore,

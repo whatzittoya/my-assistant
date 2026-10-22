@@ -87,6 +87,7 @@ const PARAGRAF_OVERRIDE = [
   "- Poin yang sudah sesuai cukup disinggung singkat di dalam kalimat (mis. \"analisis lingkungan sudah sesuai, tapi ...\"). Fokus tetap pada hal yang perlu diperbaiki.",
   "- Kalimat pembuka sesuai pola tugas (mis. \"Baik, <nama depan>. Terima kasih atas hasil pengerjaannya.\") boleh tetap ada di awal paragraf yang sama.",
   "- Panjang sekitar 3 sampai 6 kalimat. Semua aturan isi, gaya, skor dan keaslian di atas tetap berlaku.",
+  "- Jika skill di bagian paling awal menetapkan pola pembuka, sapaan, panjang feedback, isi referensi, atau rentang skor sendiri, ikuti skill tersebut dan abaikan aturan yang bertentangan di atas.",
 ].join("\n");
 
 export function rubricResponseInstruction(format: TugasFeedbackFormat = "poin"): string {

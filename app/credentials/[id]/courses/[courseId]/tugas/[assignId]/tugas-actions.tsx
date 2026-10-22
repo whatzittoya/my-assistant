@@ -315,19 +315,41 @@ function ExpandedRow({
 
   const [editCriteria, setEditCriteria] = useState<CriteriaScore[]>(defaultCriteria);
   const [editFeedback, setEditFeedback] = useState(defaultFeedback);
+  // Grand total is editable on its own; changing a criterion re-sums it.
+  const [editTotal, setEditTotal] = useState<number>(
+    result?.totalScore ??
+      finalEval?.totalScore ??
+      aiEval?.totalScore ??
+      defaultCriteria.reduce((s, c) => s + c.score, 0),
+  );
   const [saving, setSaving] = useState(false);
 
   // Sync when result changes externally (e.g. after evaluate)
   useEffect(() => {
     if (result?.criteriaScores.length) setEditCriteria(result.criteriaScores);
     if (result?.feedback) setEditFeedback(result.feedback);
+    if (result) setEditTotal(result.totalScore);
   }, [result]);
 
-  const editTotal = editCriteria.reduce((s, c) => s + c.score, 0);
+  const criteriaSum = editCriteria.reduce((s, c) => s + c.score, 0);
 
   function updateScore(i: number, score: number) {
-    setEditCriteria((prev) => prev.map((c, idx) => idx === i ? { ...c, score } : c));
+    const next = editCriteria.map((c, idx) => idx === i ? { ...c, score } : c);
+    setEditCriteria(next);
+    setEditTotal(next.reduce((s, c) => s + c.score, 0));
   }
+
+  const totalInput = (
+    <Input
+      type="number"
+      min={0}
+      max={100}
+      value={editTotal}
+      onChange={(e) => setEditTotal(Number(e.target.value))}
+      title="Grand total, can differ from the rubric sum"
+      className={`w-16 h-6 text-center text-xs font-semibold rounded-full border-0 mx-auto ${scoreColorPct(editTotal, totalMax)}`}
+    />
+  );
 
   async function saveFinal() {
     setSaving(true);
@@ -342,6 +364,7 @@ function ExpandedRow({
             courseId,
             type: "final",
             criteriaScores: editCriteria,
+            totalScore: editTotal,
             feedback: editFeedback,
           }),
         },
@@ -435,9 +458,10 @@ function ExpandedRow({
                     <tr className="bg-muted/30 font-semibold">
                       <td className="px-3 py-1.5 w-0 min-w-0">Total</td>
                       <td className="px-3 py-1.5 text-center">
-                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${scoreColorPct(editTotal, totalMax)}`}>
-                          {editTotal}
-                        </span>
+                        {totalInput}
+                        {editTotal !== criteriaSum && (
+                          <div className="mt-0.5 text-[10px] font-normal text-muted-foreground">rubrik {criteriaSum}</div>
+                        )}
                       </td>
                       <td className="px-3 py-1.5 text-center text-muted-foreground">{totalMax}</td>
                       {aiEval?.criteriaScores.length ? (
@@ -447,6 +471,14 @@ function ExpandedRow({
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+
+          {editCriteria.length === 0 && (
+            <div className="flex items-center gap-2 text-xs">
+              <span className="font-medium text-muted-foreground">Total</span>
+              {totalInput}
+              <span className="text-muted-foreground">/ {totalMax}</span>
             </div>
           )}
 
